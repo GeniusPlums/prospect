@@ -1,120 +1,84 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
-import { Dossier } from "@/components/prospect/dossier";
 import { PipelineRun } from "@/components/prospect/pipeline";
-import { Shortlist } from "@/components/prospect/shortlist";
 import { Button } from "@/components/ui/button";
-import { gradeShortlist } from "@/lib/ai/grade-shortlist";
-import { useHasHydrated, useProspectStore } from "@/lib/store";
+import { loadSearch, voteCandidate, doReveal, loadOutreach, doSend } from "@/lib/server/fns";
+import { getCandidate } from "@/lib/data/candidates";
+import { PersonAvatar } from "@/components/prospect/avatar";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/search/$id")({ component: SearchPage });
 
-function nextUnreviewed(
-  run: { results: { candidateId: string }[]; feedback: Record<string, { vote: string }> },
-  currentId: string,
-) {
-  return run.results.find((r) => r.candidateId !== currentId && !run.feedback[r.candidateId])
-    ?.candidateId;
+type ScoreRow = {
+  id: string;
+  candidate_id: string;
+  case_for: string;
+  case_against: string;
+  unclear: unknown;
+  verdict: string;
+  disqualified: boolean;
+  disqualifier_flags: unknown;
+  for_weight: number;
+  against_weight: number;
+  unclear_weight: number;
+  final_rank: number | null;
+  held_back: boolean;
+  held_back_rules: unknown;
+  model_version: string;
+  prompt_version: string;
+  icp_version_id: string;
+};
+
+function VerdictBar({ forW, againstW, unclearW }: { forW: number; againstW: number; unclearW: number }) {
+  const s = Math.max(0.001, forW + againstW + unclearW);
+  return (
+    <div className="flex h-2 overflow-hidden rounded-full bg-secondary" aria-label="Verdict for, against, unclear">
+      <span className="bg-for" style={{ width: `${(forW / s) * 100}%` }} />
+      <span className="bg-against" style={{ width: `${(againstW / s) * 100}%` }} />
+      <span className="bg-unclear" style={{ width: `${(unclearW / s) * 100}%` }} />
+    </div>
+  );
 }
 
 function SearchPage() {
   const { id } = Route.useParams();
-  const hydrated = useHasHydrated();
-  const run = useProspectStore((s) => s.searches.find((r) => r.id === id));
-  const completeSearch = useProspectStore((s) => s.completeSearch);
+  const [data, setData] = useState<Awaited<ReturnType<typeof loadSearch>> | null>(null);
   const [selectedId, setSelectedId] = useState<string | undefined>();
-  const gradedRef = useRef(false);
+  const [email, setEmail] = useState<string | null>(null);
 
-  const onPipelineDone = useCallback(() => {
-    const current = useProspectStore.getState().searches.find((r) => r.id === id);
-    completeSearch(id, current?.results ?? []);
-  }, [completeSearch, id]);
-
-  const onDecided = useCallback(() => {
-    const current = useProspectStore.getState().searches.find((r) => r.id === id);
-    if (!current || !selectedId) return;
-    const next = nextUnreviewed(current, selectedId);
-    if (next) setSelectedId(next);
-  }, [id, selectedId]);
+  async function refresh() {
+    const next = await loadSearch({ data: { id } });
+    setData(next);
+  }
 
   useEffect(() => {
-    if (!run || run.status !== "done" || run.sampleId || gradedRef.current) return;
-    const top = run.results.slice(0, 8).map((r) => r.candidateId);
-    gradedRef.current = true;
-    let cancelled = false;
-    void gradeShortlist({ data: { icp: run.icp, candidateIds: top } }).then((res) => {
-      if (cancelled || !res.ok) return;
-      const current = useProspectStore.getState().searches.find((r) => r.id === id);
-      if (!current) return;
-      const next = current.results.map((row) => {
-        const g = res.grades[row.candidateId];
-        return g ? { ...row, ...g } : row;
-      });
-      completeSearch(id, next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [run, completeSearch, id]);
+    void refresh();
+  }, [id]);
 
-  useEffect(() => {
-    if (run?.status === "done" && !selectedId && run.results[0] && typeof window !== "undefined") {
-      if (window.matchMedia("(min-width: 1024px)").matches) {
-        setSelectedId(run.results[0].candidateId);
-      }
-    }
-  }, [run, selectedId]);
+  const scores = (data && data.ok ? (data.scores as ScoreRow[]) : []) ?? [];
+  const open = scores.filter((s) => !s.held_back);
+  const held = scores.filter((s) => s.held_back);
+  const selected = scores.find((s) => s.candidate_id === selectedId);
+  const objections = useMemo(() => {
+    if (!data || !data.ok || !selected) return [];
+    return data.objections.filter((o) => o.candidate_score_id === selected.id);
+  }, [data, selected]);
 
-  useEffect(() => {
-    if (!run || run.status !== "done") return;
-    function onKey(e: KeyboardEvent) {
-      const target = e.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        (target instanceof HTMLElement && target.isContentEditable)
-      ) {
-        return;
-      }
-      const current = useProspectStore.getState().searches.find((r) => r.id === id);
-      if (!current) return;
-      const idx = current.results.findIndex((r) => r.candidateId === selectedId);
-      if (e.key === "ArrowDown" || e.key === "j") {
-        e.preventDefault();
-        const n = current.results[idx + 1] ?? current.results[0];
-        if (n) setSelectedId(n.candidateId);
-      }
-      if (e.key === "ArrowUp" || e.key === "k") {
-        e.preventDefault();
-        const n = current.results[idx - 1] ?? current.results[current.results.length - 1];
-        if (n) setSelectedId(n.candidateId);
-      }
-      if (e.key === "Escape" && selectedId && window.matchMedia("(max-width: 1023px)").matches) {
-        setSelectedId(undefined);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [run, selectedId, id]);
-
-  if (!hydrated) {
+  if (!data) {
     return (
       <AppShell>
         <main className="px-6 py-24 text-sm text-muted-foreground">Loading search…</main>
       </AppShell>
     );
   }
-
-  if (!run) {
+  if (!data.ok) {
     return (
       <AppShell>
         <main className="mx-auto max-w-xl px-6 py-24 text-center">
           <h1 className="font-display text-3xl">This search isn’t here</h1>
-          <p className="mt-3 text-sm text-muted-foreground">
-            Searches live in this browser. Start a new one from the home page.
-          </p>
-          <Link to="/" className="mt-6 inline-flex min-h-11 items-center text-sm underline">
+          <Link to="/" className="mt-6 inline-flex underline">
             New search
           </Link>
         </main>
@@ -122,67 +86,178 @@ function SearchPage() {
     );
   }
 
-  if (run.status === "running") {
+  if (data.run.status === "running") {
     return (
-      <AppShell crumb={run.icp.title}>
-        <PipelineRun onDone={onPipelineDone} />
+      <AppShell crumb={data.icp?.title}>
+        <PipelineRun events={data.events} />
       </AppShell>
     );
   }
 
-  const selected = run.results.find((r) => r.candidateId === selectedId);
-  const first = run.results[0];
-
   return (
-    <AppShell
-      wide
-      lock
-      crumb={run.icp.title}
-      action={
-        <Link to="/" className="min-h-9 text-xs text-muted-foreground hover:text-foreground">
-          New search
-        </Link>
-      }
-    >
+    <AppShell wide lock crumb={data.icp?.title} action={<Link to="/">New search</Link>}>
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside
-          className={
-            selectedId
-              ? "hidden min-h-0 w-full flex-col overflow-hidden lg:flex lg:w-96 lg:shrink-0 lg:border-r lg:border-border"
-              : "flex min-h-0 w-full flex-col overflow-hidden lg:w-96 lg:shrink-0 lg:border-r lg:border-border"
-          }
-        >
-          <Shortlist run={run} selectedId={selectedId} onSelect={setSelectedId} />
+        <aside className="flex w-full flex-col overflow-y-auto border-r border-border lg:w-96">
+          <p className="px-4 py-3 font-mono text-[10px] text-muted-foreground">
+            cache {data.run.cache_hits} hit / {data.run.cache_misses} miss
+          </p>
+          {open.map((row) => {
+            const person = getCandidate(row.candidate_id);
+            return (
+              <button
+                key={row.id}
+                type="button"
+                onClick={() => setSelectedId(row.candidate_id)}
+                className={cn(
+                  "flex gap-3 border-b border-border px-4 py-3 text-left",
+                  selectedId === row.candidate_id && "bg-accent",
+                )}
+              >
+                <PersonAvatar name={person?.name ?? row.candidate_id} />
+                <span className="min-w-0">
+                  <span className="flex items-center gap-2 text-sm font-medium">
+                    #{String(row.final_rank ?? "—").padStart(2, "0")} {person?.name}
+                  </span>
+                  <span className="block font-mono text-[10px] text-muted-foreground">
+                    icp {data.icp?.version} · {row.model_version} · {row.prompt_version}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+          {held.length > 0 ? (
+            <section className="border-t-2 border-block p-4">
+              <h2 className="text-xs font-medium text-block">Held back</h2>
+              {held.map((row) => (
+                <p key={row.id} className="mt-2 text-sm">
+                  {getCandidate(row.candidate_id)?.name} — {JSON.stringify(row.held_back_rules)}
+                </p>
+              ))}
+            </section>
+          ) : null}
         </aside>
-        <section
-          className={
-            selectedId
-              ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-              : "hidden min-h-0 min-w-0 flex-1 flex-col overflow-hidden lg:flex"
-          }
-        >
+        <section className="hidden min-w-0 flex-1 overflow-y-auto p-6 lg:block">
           {selected ? (
-            <Dossier
-              run={run}
-              graded={selected}
-              onBack={() => setSelectedId(undefined)}
-              onDecided={onDecided}
+            <DossierPanel
+              searchId={id}
+              row={selected}
+              objections={objections}
+              email={email}
+              onVote={async (vote, tags) => {
+                const res = await voteCandidate({
+                  data: { searchId: id, candidateId: selected.candidate_id, vote: { vote, tags } },
+                });
+                if (res.proposed) toast.message("ICP change proposed — accept in Rules");
+                await refresh();
+              }}
+              onReveal={async () => {
+                const res = await doReveal({ data: { searchId: id, candidateId: selected.candidate_id } });
+                if (res.ok) setEmail(res.email);
+                else toast.error(res.error);
+              }}
+              onSend={async () => {
+                const draft = await loadOutreach({ data: { searchId: id, candidateId: selected.candidate_id } });
+                if (!draft || !email) return;
+                await doSend({
+                  data: {
+                    searchId: id,
+                    candidateId: selected.candidate_id,
+                    to: email,
+                    subject: draft.subject,
+                    body: draft.body,
+                    facts: draft.personalizationFacts,
+                  },
+                });
+                toast.success("Queued to inbox");
+              }}
             />
           ) : (
-            <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
-              <p className="max-w-sm text-sm text-muted-foreground">
-                Start with the strongest match. Each person has a case for, a case against, and a
-                reviewer.
-              </p>
-              {first ? (
-                <Button onClick={() => setSelectedId(first.candidateId)}>
-                  Open #{String(first.rank).padStart(2, "0")} first
-                </Button>
-              ) : null}
-            </div>
+            <p className="text-sm text-muted-foreground">Open the strongest match.</p>
           )}
         </section>
       </div>
     </AppShell>
+  );
+}
+
+function DossierPanel({
+  row,
+  objections,
+  email,
+  onVote,
+  onReveal,
+  onSend,
+}: {
+  searchId: string;
+  row: ScoreRow;
+  objections: { claim: string; objection: string }[];
+  email: string | null;
+  onVote: (vote: "up" | "down", tags: string[]) => void;
+  onReveal: () => void;
+  onSend: () => void;
+}) {
+  const person = getCandidate(row.candidate_id);
+  const unclear = (() => {
+    if (Array.isArray(row.unclear)) return row.unclear as string[];
+    if (typeof row.unclear === "string") {
+      try {
+        const parsed = JSON.parse(row.unclear) as unknown;
+        return Array.isArray(parsed) ? (parsed as string[]) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  })();
+  return (
+    <div className="mx-auto max-w-2xl space-y-6">
+      <div>
+        <h1 className="font-display text-3xl">{person?.name}</h1>
+        <p className="text-sm text-muted-foreground">{person?.headline}</p>
+        <p className="mt-2 font-mono text-[10px] text-muted-foreground">
+          icp {row.icp_version_id.slice(-6)} · {row.model_version} · {row.prompt_version}
+        </p>
+      </div>
+      <VerdictBar forW={row.for_weight} againstW={row.against_weight} unclearW={row.unclear_weight} />
+      <section className="border-l-2 border-for pl-4">
+        <h2 className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Case for</h2>
+        <p className="mt-2 text-sm">{row.case_for}</p>
+      </section>
+      <section className="border-l-2 border-against pl-4">
+        <h2 className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Case against</h2>
+        <p className="mt-2 text-sm">{row.case_against}</p>
+      </section>
+      <section className="border-l-2 border-dashed border-unclear pl-4">
+        <h2 className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Unclear</h2>
+        <ul className="mt-2 list-disc pl-4 text-sm">
+          {unclear.map((u) => (
+            <li key={u}>{u}</li>
+          ))}
+        </ul>
+      </section>
+      <aside className="border-l-2 border-objection pl-4">
+        <h2 className="text-xs uppercase tracking-[0.14em] text-objection">Reviewer objections</h2>
+        {objections.map((o) => (
+          <p key={o.claim} className="mt-2 text-sm">
+            <span className="font-medium">{o.claim}</span> {o.objection}
+          </p>
+        ))}
+      </aside>
+      <div className="flex flex-wrap gap-2">
+        <Button onClick={() => onVote("up", ["strong signal"])}>Keep</Button>
+        <Button variant="outline" onClick={() => onVote("down", ["skills miss"])}>
+          Pass
+        </Button>
+        <Button variant="secondary" onClick={() => void onReveal()}>
+          Reveal contact
+        </Button>
+        {email ? (
+          <Button variant="outline" onClick={() => void onSend()}>
+            Send from inbox
+          </Button>
+        ) : null}
+      </div>
+      {email ? <p className="font-mono text-sm">{email}</p> : null}
+    </div>
   );
 }

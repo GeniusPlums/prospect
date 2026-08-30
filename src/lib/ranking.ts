@@ -175,11 +175,24 @@ export function scoreCandidate(candidate: Candidate, icp: Icp): number {
     score += 6;
   }
   if (icp.seniority === "staff" && candidate.years < 8) score -= 8;
+  if (icp.seniority !== "founding" && /founding/.test(hay)) {
+    score -= 14;
+  }
+  if (icp.seniority === "founding" && !/founding|early|seed/.test(hay) && currentKind !== "startup") {
+    score -= 10;
+  }
   if (icp.skills.some((s) => s.toLowerCase().includes("design system"))) {
-    if (hay.includes("design system")) score += 10;
+    if (hay.includes("design system")) score += 14;
+    else score -= 16;
   }
   if (icp.skills.some((s) => s.toLowerCase().includes("ranking"))) {
-    if (hay.includes("ranking") || hay.includes("recommend")) score += 10;
+    if (hay.includes("ranking") || hay.includes("recommend") || hay.includes("search")) score += 16;
+    else score -= 22;
+  }
+  if (icp.skills.some((s) => s.toLowerCase() === "react") && icp.seniority === "staff") {
+    if (!hay.includes("frontend") && !hay.includes("react") && !hay.includes("design system")) {
+      score -= 14;
+    }
   }
 
   // Tiny deterministic jitter so ties break stably without hydration drift.

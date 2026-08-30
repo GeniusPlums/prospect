@@ -1,0 +1,13 @@
+{
+  "fluid": true,
+  "crons": [
+    {
+      "path": "/api/cron/billing",
+      "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/refresh",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

@@ -10,11 +10,61 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AtsRouteImport } from './routes/ats'
+import { Route as AutomationsRouteImport } from './routes/automations'
+import { Route as DashboardRouteImport } from './routes/dashboard'
+import { Route as EvalsRouteImport } from './routes/evals'
+import { Route as InboxRouteImport } from './routes/inbox'
+import { Route as RulesRouteImport } from './routes/rules'
+import { Route as SearchesRouteImport } from './routes/searches'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SearchIdRouteImport } from './routes/search.$id'
+import { Route as ApiCronBillingRouteImport } from './routes/api.cron.billing'
+import { Route as ApiCronRefreshRouteImport } from './routes/api.cron.refresh'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtsRoute = AtsRouteImport.update({
+  id: '/ats',
+  path: '/ats',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AutomationsRoute = AutomationsRouteImport.update({
+  id: '/automations',
+  path: '/automations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DashboardRoute = DashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EvalsRoute = EvalsRouteImport.update({
+  id: '/evals',
+  path: '/evals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RulesRoute = RulesRouteImport.update({
+  id: '/rules',
+  path: '/rules',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SearchesRoute = SearchesRouteImport.update({
+  id: '/searches',
+  path: '/searches',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SearchIdRoute = SearchIdRouteImport.update({
@@ -22,31 +72,118 @@ const SearchIdRoute = SearchIdRouteImport.update({
   path: '/search/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiCronBillingRoute = ApiCronBillingRouteImport.update({
+  id: '/api/cron/billing',
+  path: '/api/cron/billing',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiCronRefreshRoute = ApiCronRefreshRouteImport.update({
+  id: '/api/cron/refresh',
+  path: '/api/cron/refresh',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/ats': typeof AtsRoute
+  '/automations': typeof AutomationsRoute
+  '/dashboard': typeof DashboardRoute
+  '/evals': typeof EvalsRoute
+  '/inbox': typeof InboxRoute
+  '/rules': typeof RulesRoute
+  '/searches': typeof SearchesRoute
+  '/settings': typeof SettingsRoute
   '/search/$id': typeof SearchIdRoute
+  '/api/cron/billing': typeof ApiCronBillingRoute
+  '/api/cron/refresh': typeof ApiCronRefreshRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/ats': typeof AtsRoute
+  '/automations': typeof AutomationsRoute
+  '/dashboard': typeof DashboardRoute
+  '/evals': typeof EvalsRoute
+  '/inbox': typeof InboxRoute
+  '/rules': typeof RulesRoute
+  '/searches': typeof SearchesRoute
+  '/settings': typeof SettingsRoute
   '/search/$id': typeof SearchIdRoute
+  '/api/cron/billing': typeof ApiCronBillingRoute
+  '/api/cron/refresh': typeof ApiCronRefreshRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/ats': typeof AtsRoute
+  '/automations': typeof AutomationsRoute
+  '/dashboard': typeof DashboardRoute
+  '/evals': typeof EvalsRoute
+  '/inbox': typeof InboxRoute
+  '/rules': typeof RulesRoute
+  '/searches': typeof SearchesRoute
+  '/settings': typeof SettingsRoute
   '/search/$id': typeof SearchIdRoute
+  '/api/cron/billing': typeof ApiCronBillingRoute
+  '/api/cron/refresh': typeof ApiCronRefreshRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/search/$id'
+  fullPaths:
+    | '/'
+    | '/ats'
+    | '/automations'
+    | '/dashboard'
+    | '/evals'
+    | '/inbox'
+    | '/rules'
+    | '/searches'
+    | '/settings'
+    | '/search/$id'
+    | '/api/cron/billing'
+    | '/api/cron/refresh'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/search/$id'
-  id: '__root__' | '/' | '/search/$id'
+  to:
+    | '/'
+    | '/ats'
+    | '/automations'
+    | '/dashboard'
+    | '/evals'
+    | '/inbox'
+    | '/rules'
+    | '/searches'
+    | '/settings'
+    | '/search/$id'
+    | '/api/cron/billing'
+    | '/api/cron/refresh'
+  id:
+    | '__root__'
+    | '/'
+    | '/ats'
+    | '/automations'
+    | '/dashboard'
+    | '/evals'
+    | '/inbox'
+    | '/rules'
+    | '/searches'
+    | '/settings'
+    | '/search/$id'
+    | '/api/cron/billing'
+    | '/api/cron/refresh'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AtsRoute: typeof AtsRoute
+  AutomationsRoute: typeof AutomationsRoute
+  DashboardRoute: typeof DashboardRoute
+  EvalsRoute: typeof EvalsRoute
+  InboxRoute: typeof InboxRoute
+  RulesRoute: typeof RulesRoute
+  SearchesRoute: typeof SearchesRoute
+  SettingsRoute: typeof SettingsRoute
   SearchIdRoute: typeof SearchIdRoute
+  ApiCronBillingRoute: typeof ApiCronBillingRoute
+  ApiCronRefreshRoute: typeof ApiCronRefreshRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -58,6 +195,62 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/ats': {
+      id: '/ats'
+      path: '/ats'
+      fullPath: '/ats'
+      preLoaderRoute: typeof AtsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/automations': {
+      id: '/automations'
+      path: '/automations'
+      fullPath: '/automations'
+      preLoaderRoute: typeof AutomationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dashboard': {
+      id: '/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof DashboardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/evals': {
+      id: '/evals'
+      path: '/evals'
+      fullPath: '/evals'
+      preLoaderRoute: typeof EvalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rules': {
+      id: '/rules'
+      path: '/rules'
+      fullPath: '/rules'
+      preLoaderRoute: typeof RulesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/searches': {
+      id: '/searches'
+      path: '/searches'
+      fullPath: '/searches'
+      preLoaderRoute: typeof SearchesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/search/$id': {
       id: '/search/$id'
       path: '/search/$id'
@@ -65,12 +258,36 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SearchIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/cron/billing': {
+      id: '/api/cron/billing'
+      path: '/api/cron/billing'
+      fullPath: '/api/cron/billing'
+      preLoaderRoute: typeof ApiCronBillingRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/cron/refresh': {
+      id: '/api/cron/refresh'
+      path: '/api/cron/refresh'
+      fullPath: '/api/cron/refresh'
+      preLoaderRoute: typeof ApiCronRefreshRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AtsRoute: AtsRoute,
+  AutomationsRoute: AutomationsRoute,
+  DashboardRoute: DashboardRoute,
+  EvalsRoute: EvalsRoute,
+  InboxRoute: InboxRoute,
+  RulesRoute: RulesRoute,
+  SearchesRoute: SearchesRoute,
+  SettingsRoute: SettingsRoute,
   SearchIdRoute: SearchIdRoute,
+  ApiCronBillingRoute: ApiCronBillingRoute,
+  ApiCronRefreshRoute: ApiCronRefreshRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

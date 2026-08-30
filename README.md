@@ -14,10 +14,18 @@ Searches and reveals live in this browser (`localStorage`). Contact stays hidden
 
 ## Stack
 
-- React 19 + TanStack Start / Router
-- Tailwind v4
-- Zustand (persisted searches)
-- Vite + Nitro (Vercel)
+- React 19 + TanStack Start / Router (Vercel + Nitro, Fluid Compute)
+- Postgres (Neon or PGLite) + in-process HNSW-equivalent cosine; pgvector HNSW when the engine supports it
+- Inngest-shaped durable steps (in-process without `INNGEST_EVENT_KEY`)
+- Tailwind v4, paper/navy tokens
+- Coresignal behind `profile_source` (local index with no keys)
+
+```bash
+npm install
+npm run dev
+npm run eval
+npm test
+```
 
 ## Run locally
 
