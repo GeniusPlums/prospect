@@ -1,6 +1,6 @@
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { IcpEditor } from "@/components/prospect/icp-editor";
@@ -14,17 +14,34 @@ import type { Icp } from "@/lib/types";
 
 export function BriefHome() {
   const navigate = useNavigate();
-  const [text, setText] = useState("");
-  const [icp, setIcp] = useState<Icp | null>(null);
-  const [sampleId, setSampleId] = useState<string | undefined>();
+  const { sample: sampleFromUrl } = useSearch({ from: "/" });
+  const seeded = sampleBriefs.find((s) => s.id === sampleFromUrl);
+  const [text, setText] = useState(seeded?.jd ?? "");
+  const [icp, setIcp] = useState<Icp | null>(seeded?.icp ?? null);
+  const [sampleId, setSampleId] = useState<string | undefined>(seeded?.id);
   const [parsing, setParsing] = useState(false);
   const [running, setRunning] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sampleFromUrl) return;
+    const next = sampleBriefs.find((s) => s.id === sampleFromUrl);
+    if (!next) return;
+    setText(next.jd);
+    setIcp(next.icp);
+    setSampleId(next.id);
+  }, [sampleFromUrl]);
 
   async function onParse() {
     const sample = sampleBriefs.find((s) => s.jd.trim() === text.trim());
     if (sample) {
       setIcp(sample.icp);
       setSampleId(sample.id);
+      await navigate({ to: "/", search: { sample: sample.id } });
       return;
     }
     setParsing(true);
@@ -41,14 +58,6 @@ export function BriefHome() {
     } finally {
       setParsing(false);
     }
-  }
-
-  function loadSample(id: string) {
-    const sample = sampleBriefs.find((s) => s.id === id);
-    if (!sample) return;
-    setText(sample.jd);
-    setIcp(sample.icp);
-    setSampleId(sample.id);
   }
 
   async function onRun() {
@@ -76,17 +85,25 @@ export function BriefHome() {
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
             <FlowSteps current={2} />
-            <button type="button" onClick={() => setIcp(null)} className="min-h-11 text-xs underline">
+            <Link
+              to="/"
+              search={{}}
+              onClick={() => {
+                setIcp(null);
+                setSampleId(undefined);
+              }}
+              className="min-h-11 text-xs underline"
+            >
               Change role
-            </button>
+            </Link>
           </div>
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 pb-36 sm:px-6">
             <IcpEditor icp={icp} onChange={setIcp} />
           </main>
-          <div className="sticky bottom-0 z-10 border-t border-border bg-background/95">
-            <div className="mx-auto flex max-w-6xl justify-end px-4 py-3 sm:px-6">
-              <Button onClick={() => void onRun()} disabled={running} size="lg">
-                {running ? "Running pipeline…" : "Find 22 people"}
+          <div className="sticky bottom-0 z-40 border-t border-border bg-background/95">
+            <div className="mx-auto flex max-w-6xl justify-end px-4 py-3 pr-32 pb-16 sm:px-6 sm:pb-3">
+              <Button onClick={() => void onRun()} disabled={!hydrated || running} size="lg">
+                {!hydrated ? "Loading…" : running ? "Starting search…" : "Find 22 people"}
                 <ArrowRight />
               </Button>
             </div>
@@ -110,15 +127,15 @@ export function BriefHome() {
             <h2 className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Start with a role</h2>
             <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               {sampleBriefs.map((item) => (
-                <button
+                <Link
                   key={item.id}
-                  type="button"
-                  onClick={() => loadSample(item.id)}
+                  to="/"
+                  search={{ sample: item.id }}
                   className="flex flex-col rounded-xl border border-border bg-card p-4 text-left"
                 >
                   <p className="font-medium text-sm">{item.label}</p>
                   <p className="mt-2 text-xs text-muted-foreground">{item.blurb}</p>
-                </button>
+                </Link>
               ))}
             </div>
           </section>
@@ -136,8 +153,8 @@ export function BriefHome() {
                 className="min-h-40 border-0 bg-transparent shadow-none focus-visible:ring-0"
               />
               <div className="flex justify-end">
-                <Button onClick={() => void onParse()} disabled={parsing || text.trim().length < 12}>
-                  {parsing ? "Reading brief…" : "Read the brief"}
+                <Button onClick={() => void onParse()} disabled={!hydrated || parsing || text.trim().length < 12}>
+                  {!hydrated ? "Loading…" : parsing ? "Reading brief…" : "Read the brief"}
                 </Button>
               </div>
             </div>

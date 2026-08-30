@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PGlite } from "@electric-sql/pglite";
+import type { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import { isMigrationFile, pendingMigrations } from "../../scripts/migration-plan.mjs";
 
@@ -86,18 +86,24 @@ function asQueryable(db: PGlite): Queryable {
 async function connect(): Promise<Queryable> {
   const url = process.env.DATABASE_URL;
   if (url) {
-    pool = new pg.Pool({ connectionString: url, max: 4 });
+    pool = new pg.Pool({
+      connectionString: url,
+      max: 4,
+      connectionTimeoutMillis: 8000,
+      idleTimeoutMillis: 10_000,
+    });
     const client: Queryable = {
       async query(text, params = []) {
         const result = await pool!.query(text, params);
         return { rows: result.rows as Record<string, unknown>[] };
       },
     };
-    await migrate(client, migrationsDir());
-    await tryHnsw(client);
+    // Schema is applied at deploy (`npm run db:migrate`). Skipping migrate +
+    // CREATE EXTENSION on the request path avoids a 30s+ hang on cold start.
     return client;
   }
 
+  const { PGlite } = await import("@electric-sql/pglite");
   pglite = new PGlite();
   const client = asQueryable(pglite);
   await migrate(client, migrationsDir());
@@ -132,6 +138,25 @@ export async function sqlOne<T = Record<string, unknown>>(
 ): Promise<T | undefined> {
   const rows = await sql<T>(text, params);
   return rows[0];
+}
+
+/** One round-trip multi-row INSERT. `prefix` is `INSERT INTO t (cols) VALUES`. */
+export async function insertMany(
+  prefix: string,
+  rows: unknown[][],
+  casts: Array<string | undefined> = [],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const params: unknown[] = [];
+  const tuples = rows.map((row) => {
+    const cells = row.map((val, j) => {
+      params.push(val);
+      const cast = casts[j];
+      return cast ? `$${params.length}::${cast}` : `$${params.length}`;
+    });
+    return `(${cells.join(",")})`;
+  });
+  await sql(`${prefix} ${tuples.join(",")}`, params);
 }
 
 export { pglite, pool };

@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { ensureDbReady, sql } from "@/lib/db";
 import { DEV_ORG } from "@/lib/ids";
 import { writeIcpVersion, getIcp, acceptIcpVersion, writeOrgRules, currentOrgRules } from "@/lib/icp/engine";
-import { createAndRunSearch, applyFeedback } from "@/lib/pipeline/run-search";
+import { createSearchRun, executeSearchRun, applyFeedback } from "@/lib/pipeline/run-search";
 import { parseBrief } from "@/lib/ai/parse-brief";
 import { sampleBriefs } from "@/lib/data/sample-briefs";
 import { revealContact, draftGroundedOutreach, sendOutreach } from "@/lib/reveal/reveal";
@@ -36,12 +36,20 @@ export const startFromBrief = createServerFn({ method: "POST" })
       icp,
       authorType: "user",
     });
-    const searchId = await createAndRunSearch({
+    const searchId = await createSearchRun({
       orgId: DEV_ORG,
       icp: stored,
       briefText: data.text,
     });
     return { ok: true as const, searchId, icp: stored };
+  });
+
+export const runSearchPipeline = createServerFn({ method: "POST" })
+  .validator((input: { id: string }) => input)
+  .handler(async ({ data }) => {
+    await boot();
+    await executeSearchRun(data.id);
+    return { ok: true as const };
   });
 
 export const loadSearch = createServerFn({ method: "GET" })

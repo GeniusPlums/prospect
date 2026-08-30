@@ -17,3 +17,11 @@
 **Why.** Put the cached sourcing product on a real Postgres + Vercel production URL.
 
 **Tested.** `vercel --prod` Ready. Production alias `https://prospect-chi-lyart.vercel.app` returns 200 for `/`, `/searches`, `/evals`, `/dashboard`, `/settings`, `/inbox`, `/ats`, `/rules`. Deploy build ran `db:migrate` (up to date).
+
+## 2026-08-30 — Unstick production clicks
+
+**What changed.** Homepage sample roles are real `/?sample=` links (work before hydration). `startFromBrief` only creates the run; the search page runs the pipeline and polls. Score / criterion / objection / ICP criteria writes are batched (`insertMany`). Runtime Postgres skips migrate + `CREATE EXTENSION` (those run at deploy). PGlite is a dynamic import.
+
+**Why.** A production search took 37s of sequential IAD→Singapore round-trips, so “Find 22 people” looked frozen. Sample cards were SSR buttons with no `href`, so clicks before hydration did nothing.
+
+**Tested.** `npm test` (eval, icp, pipeline split/idempotent, billing, adapters, insertMany). `npm run typecheck`. `npm run eval`.

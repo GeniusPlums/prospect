@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ensureDbReady } from "@/lib/db";
 import { writeIcpVersion } from "@/lib/icp/engine";
-import { createAndRunSearch } from "./run-search.ts";
+import { createAndRunSearch, createSearchRun, executeSearchRun } from "./run-search.ts";
 import { sampleBriefs } from "@/lib/data/sample-briefs";
 import { sql } from "@/lib/db";
 import { DEV_ORG } from "@/lib/ids";
@@ -28,5 +28,37 @@ describe("pipeline", () => {
       [id],
     );
     assert.ok(Number(objections[0]?.n ?? 0) > 0);
+  });
+
+  it("createSearchRun does not score; execute is idempotent", async () => {
+    await ensureDbReady();
+    const icp = await writeIcpVersion({
+      roleKey: "payments-backend-split",
+      icp: sampleBriefs[0]!.icp,
+      authorType: "user",
+    });
+    const id = await createSearchRun({ orgId: DEV_ORG, icp, briefText: sampleBriefs[0]!.jd });
+    const created = await sql<{ status: string }>(`SELECT status FROM search_run WHERE id=$1`, [id]);
+    assert.equal(created[0]?.status, "running");
+    const before = await sql<{ n: string }>(
+      `SELECT count(*)::text as n FROM candidate_score WHERE search_run_id=$1`,
+      [id],
+    );
+    assert.equal(Number(before[0]?.n ?? 0), 0);
+    await executeSearchRun(id);
+    const done = await sql<{ status: string }>(`SELECT status FROM search_run WHERE id=$1`, [id]);
+    assert.equal(done[0]?.status, "done");
+    const scores = await sql<{ n: string }>(
+      `SELECT count(*)::text as n FROM candidate_score WHERE search_run_id=$1`,
+      [id],
+    );
+    const n = Number(scores[0]?.n ?? 0);
+    assert.ok(n > 0);
+    await executeSearchRun(id);
+    const again = await sql<{ n: string }>(
+      `SELECT count(*)::text as n FROM candidate_score WHERE search_run_id=$1`,
+      [id],
+    );
+    assert.equal(Number(again[0]?.n ?? 0), n);
   });
 });

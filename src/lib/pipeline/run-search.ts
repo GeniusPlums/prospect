@@ -1,4 +1,4 @@
-import { sql } from "@/lib/db";
+import { insertMany, sql, sqlOne } from "@/lib/db";
 import { nid } from "@/lib/ids";
 import { peopleSource } from "@/lib/adapters/registry";
 import { cosine, embedText } from "@/lib/embed";
@@ -27,7 +27,7 @@ async function cachedIds(orgId: string, externalIds: string[]): Promise<{ hits: 
   };
 }
 
-export async function createAndRunSearch(input: {
+export async function createSearchRun(input: {
   orgId: string;
   icp: StoredIcp;
   briefText: string;
@@ -37,13 +37,37 @@ export async function createAndRunSearch(input: {
     `INSERT INTO search_run (id, org_id, icp_version_id, status, brief_text) VALUES ($1,$2,$3,'running',$4)`,
     [searchId, input.orgId, input.icp.id, input.briefText],
   );
-
   await emit(searchId, { step: "search", message: "People search (IDs only, no collect credits)" });
+  return searchId;
+}
+
+export async function executeSearchRun(searchId: string): Promise<string> {
+  const run = await sqlOne<{ id: string; org_id: string; icp_version_id: string; status: string }>(
+    `SELECT id, org_id, icp_version_id, status FROM search_run WHERE id=$1`,
+    [searchId],
+  );
+  if (!run) throw new Error("Search not found");
+  if (run.status === "done") return searchId;
+
+  const already = await sqlOne<{ n: string }>(
+    `SELECT count(*)::text as n FROM candidate_score WHERE search_run_id=$1`,
+    [searchId],
+  );
+  if (Number(already?.n ?? 0) > 0) {
+    await sql(`UPDATE search_run SET status='done', completed_at=coalesce(completed_at, now()) WHERE id=$1`, [
+      searchId,
+    ]);
+    return searchId;
+  }
+
+  const icp = await getIcp(run.icp_version_id);
+  if (!icp) throw new Error("ICP missing");
+
   const source = peopleSource();
-  const hits = await source.search({ icp: input.icp });
+  const hits = await source.search({ icp });
   const ids = hits.map((h) => h.externalId);
 
-  const { hits: cacheHits, misses } = await cachedIds(input.orgId, ids);
+  const { hits: cacheHits, misses } = await cachedIds(run.org_id, ids);
   await sql(`UPDATE search_run SET cache_hits=$2, cache_misses=$3 WHERE id=$1`, [
     searchId,
     cacheHits.length,
@@ -58,18 +82,17 @@ export async function createAndRunSearch(input: {
   if (misses.length) {
     await emit(searchId, { step: "collect", message: `Collect ${misses.length} misses only` });
     await source.collect(misses);
-    await recordUsage(input.orgId, "profile", misses.length);
+    await recordUsage(run.org_id, "profile", misses.length);
     await sql(`UPDATE search_run SET profiles_charged=$2 WHERE id=$1`, [searchId, misses.length]);
   } else {
     await emit(searchId, { step: "collect", message: "Collect skipped — warm index hit 100%" });
   }
 
   await emit(searchId, { step: "stage1", message: "Hybrid retrieval → working set" });
-  const icp = input.icp;
   const queryVec = embedText([icp.title, icp.summary, ...icp.must, ...icp.skills].join(" "));
   const corpus = await sql<{ id: string; embedding: number[] | string }>(
     `SELECT id, embedding FROM candidate WHERE org_id=$1`,
-    [input.orgId],
+    [run.org_id],
   );
   const hybrid = corpus
     .map((row) => {
@@ -91,59 +114,105 @@ export async function createAndRunSearch(input: {
   await emit(searchId, { step: "disqualifier", message: "Disqualifier pass (separate)" });
 
   const heldRules = icp.disqualifiers;
+  const scoreRows: unknown[][] = [];
+  const gradeRows: unknown[][] = [];
+  const objectionRows: unknown[][] = [];
 
   for (const [i, row] of shortlist.entries()) {
     const detail = gradeCandidate(row.candidateId, icp);
     if (!detail) continue;
-    const hard = row.disqualifiers.filter((d) => heldRules.some((r) => d.flag.toLowerCase().includes(r.slice(0, 8).toLowerCase()) || r.toLowerCase().includes(d.flag.toLowerCase())));
-    const heldBack = hard.length > 0 && row.verdict === "flagged" && row.disqualifiers.some((d) => d.flag === "Services-only background" || d.flag === "Keyword-stuffed profile" || d.flag === "US-bound");
+    const hard = row.disqualifiers.filter((d) =>
+      heldRules.some(
+        (r) => d.flag.toLowerCase().includes(r.slice(0, 8).toLowerCase()) || r.toLowerCase().includes(d.flag.toLowerCase()),
+      ),
+    );
+    const heldBack =
+      hard.length > 0 &&
+      row.verdict === "flagged" &&
+      row.disqualifiers.some(
+        (d) => d.flag === "Services-only background" || d.flag === "Keyword-stuffed profile" || d.flag === "US-bound",
+      );
     const scoreId = nid("scr");
-    await sql(
-      `INSERT INTO candidate_score (
+    scoreRows.push([
+      scoreId,
+      searchId,
+      row.candidateId,
+      icp.id,
+      MODEL_VERSIONS.heuristic,
+      PROMPT_VERSIONS.gradeRubric,
+      detail.caseFor,
+      detail.caseAgainst,
+      JSON.stringify(detail.unclear),
+      row.verdict,
+      detail.disqualified,
+      JSON.stringify(row.disqualifiers),
+      detail.forWeight,
+      detail.againstWeight,
+      detail.unclearWeight,
+      i + 1,
+      heldBack ? null : row.rank,
+      heldBack,
+      JSON.stringify(heldBack ? row.disqualifiers.map((d) => d.flag) : []),
+    ]);
+    for (const g of detail.criterionGrades) {
+      gradeRows.push([nid("grd"), scoreId, g.criterionId, g.grade, g.evidence]);
+    }
+    for (const obj of detail.reviewerObjections) {
+      objectionRows.push([nid("obj"), scoreId, obj.claim, obj.objection]);
+    }
+  }
+
+  await insertMany(
+    `INSERT INTO candidate_score (
         id, search_run_id, candidate_id, icp_version_id, model_version, prompt_version,
         case_for, case_against, unclear, verdict, disqualified, disqualifier_flags,
         for_weight, against_weight, unclear_weight, stage1_rank, final_rank, held_back, held_back_rules
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10,$11,$12::jsonb,$13,$14,$15,$16,$17,$18,$19::jsonb)`,
-      [
-        scoreId,
-        searchId,
-        row.candidateId,
-        icp.id,
-        MODEL_VERSIONS.heuristic,
-        PROMPT_VERSIONS.gradeRubric,
-        detail.caseFor,
-        detail.caseAgainst,
-        JSON.stringify(detail.unclear),
-        row.verdict,
-        detail.disqualified,
-        JSON.stringify(row.disqualifiers),
-        detail.forWeight,
-        detail.againstWeight,
-        detail.unclearWeight,
-        i + 1,
-        heldBack ? null : row.rank,
-        heldBack,
-        JSON.stringify(heldBack ? row.disqualifiers.map((d) => d.flag) : []),
-      ],
-    );
-    for (const g of detail.criterionGrades) {
-      await sql(
-        `INSERT INTO criterion_grade (id, candidate_score_id, criterion_id, grade, evidence) VALUES ($1,$2,$3,$4,$5)`,
-        [nid("grd"), scoreId, g.criterionId, g.grade, g.evidence],
-      );
-    }
-    for (const obj of detail.reviewerObjections) {
-      await sql(
-        `INSERT INTO reviewer_objection (id, candidate_score_id, claim, objection) VALUES ($1,$2,$3,$4)`,
-        [nid("obj"), scoreId, obj.claim, obj.objection],
-      );
-    }
-  }
+      ) VALUES`,
+    scoreRows,
+    [
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "jsonb",
+      undefined,
+      undefined,
+      "jsonb",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      "jsonb",
+    ],
+  );
+  await insertMany(
+    `INSERT INTO criterion_grade (id, candidate_score_id, criterion_id, grade, evidence) VALUES`,
+    gradeRows,
+  );
+  await insertMany(
+    `INSERT INTO reviewer_objection (id, candidate_score_id, claim, objection) VALUES`,
+    objectionRows,
+  );
 
   await emit(searchId, { step: "reviewer", message: "Reviewer objections posted (rank unchanged)" });
   await emit(searchId, { step: "done", message: "Shortlist ready · zero enrichment spend" });
   await sql(`UPDATE search_run SET status='done', completed_at=now() WHERE id=$1`, [searchId]);
   return searchId;
+}
+
+export async function createAndRunSearch(input: {
+  orgId: string;
+  icp: StoredIcp;
+  briefText: string;
+}): Promise<string> {
+  const searchId = await createSearchRun(input);
+  return executeSearchRun(searchId);
 }
 
 export async function rerankFromStage1(searchRunId: string, feedback: Record<string, FeedbackVote>) {

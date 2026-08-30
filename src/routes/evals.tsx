@@ -8,6 +8,7 @@ export const Route = createFileRoute("/evals")({ component: EvalsPage });
 
 function EvalsPage() {
   const [data, setData] = useState<Awaited<ReturnType<typeof dashboard>> | null>(null);
+  const [running, setRunning] = useState(false);
   useEffect(() => {
     void dashboard().then(setData);
   }, []);
@@ -16,12 +17,18 @@ function EvalsPage() {
       <main className="mx-auto max-w-2xl space-y-4 px-4 py-10">
         <h1 className="font-display text-3xl">Eval harness</h1>
         <Button
+          disabled={running}
           onClick={async () => {
-            await persistEval();
-            setData(await dashboard());
+            setRunning(true);
+            try {
+              await persistEval();
+              setData(await dashboard());
+            } finally {
+              setRunning(false);
+            }
           }}
         >
-          Run suite
+          {running ? "Running suite…" : "Run suite"}
         </Button>
         <ul className="space-y-2 font-mono text-xs">
           {(data?.evals ?? []).map((e) => (

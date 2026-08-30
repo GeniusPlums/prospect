@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { PipelineRun } from "@/components/prospect/pipeline";
 import { Button } from "@/components/ui/button";
-import { loadSearch, voteCandidate, doReveal, loadOutreach, doSend } from "@/lib/server/fns";
+import { loadSearch, runSearchPipeline, voteCandidate, doReveal, loadOutreach, doSend } from "@/lib/server/fns";
 import { getCandidate } from "@/lib/data/candidates";
 import { PersonAvatar } from "@/components/prospect/avatar";
 import { cn } from "@/lib/utils";
@@ -51,10 +51,49 @@ function SearchPage() {
   async function refresh() {
     const next = await loadSearch({ data: { id } });
     setData(next);
+    return next;
   }
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    async function kick() {
+      const first = await loadSearch({ data: { id } });
+      if (cancelled) return;
+      setData(first);
+      if (first.ok && first.run.status === "running") {
+        try {
+          await runSearchPipeline({ data: { id } });
+        } catch (err) {
+          if (!cancelled) toast.error(err instanceof Error ? err.message : "Pipeline failed");
+        }
+        if (!cancelled) {
+          const done = await loadSearch({ data: { id } });
+          if (!cancelled) setData(done);
+        }
+      }
+    }
+
+    async function poll() {
+      while (!cancelled) {
+        await new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, 400);
+        });
+        if (cancelled) return;
+        const next = await loadSearch({ data: { id } });
+        if (cancelled) return;
+        setData(next);
+        if (!next.ok || next.run.status !== "running") return;
+      }
+    }
+
+    void kick();
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [id]);
 
   const scores = (data && data.ok ? (data.scores as ScoreRow[]) : []) ?? [];

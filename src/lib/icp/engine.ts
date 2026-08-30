@@ -1,4 +1,4 @@
-import { sql, sqlOne } from "@/lib/db";
+import { insertMany, sql, sqlOne } from "@/lib/db";
 import { DEV_ORG, nid } from "@/lib/ids";
 import type { Icp } from "@/lib/types";
 
@@ -60,20 +60,18 @@ async function insertCriteria(icpVersionId: string, icp: Icp) {
     ...icp.nice.map((body) => ({ kind: "nice" as const, body })),
     ...icp.disqualifiers.map((body) => ({ kind: "disqualifier" as const, body })),
   ];
-  for (const [i, row] of rows.entries()) {
-    await sql(
-      `INSERT INTO icp_criterion (id, icp_version_id, kind, body, machine_spec, position)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6)`,
-      [
-        nid("crt"),
-        icpVersionId,
-        row.kind,
-        row.body,
-        JSON.stringify({ tokens: row.body.toLowerCase() }),
-        i,
-      ],
-    );
-  }
+  await insertMany(
+    `INSERT INTO icp_criterion (id, icp_version_id, kind, body, machine_spec, position) VALUES`,
+    rows.map((row, i) => [
+      nid("crt"),
+      icpVersionId,
+      row.kind,
+      row.body,
+      JSON.stringify({ tokens: row.body.toLowerCase() }),
+      i,
+    ]),
+    [undefined, undefined, undefined, undefined, "jsonb", undefined],
+  );
 }
 
 export async function writeIcpVersion(input: {
