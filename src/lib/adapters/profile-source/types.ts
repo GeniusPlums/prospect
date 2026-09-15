@@ -11,7 +11,7 @@ export type CollectedProfile = {
 };
 
 export type PeopleSource = {
-  name: "local" | "coresignal" | "pdl";
+  name: "local" | "coresignal" | "pdl" | "composio";
   search(query: Record<string, unknown>): Promise<SearchHit[]>;
   collect(ids: string[]): Promise<CollectedProfile[]>;
 };

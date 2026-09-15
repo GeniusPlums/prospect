@@ -2,10 +2,13 @@ import { Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import { Mark } from "@/components/mark";
 import { cn } from "@/lib/utils";
+import { authClient } from "@/lib/auth/client";
+import { Button } from "@/components/ui/button";
 
 const NAV = [
   { to: "/", label: "Source" },
   { to: "/searches", label: "Searches" },
+  { to: "/connections", label: "Connections" },
   { to: "/rules", label: "Rules" },
   { to: "/inbox", label: "Inbox" },
   { to: "/ats", label: "ATS" },
@@ -64,6 +67,7 @@ export function AppShell({
           </nav>
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             {action}
+            <SessionChip />
           </div>
         </div>
         <nav className="flex gap-3 overflow-x-auto border-t border-border px-4 py-2 text-xs md:hidden">
@@ -76,5 +80,31 @@ export function AppShell({
       </header>
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>
     </div>
+  );
+}
+
+function SessionChip() {
+  const { data, isPending } = authClient.useSession();
+  if (isPending) return <span className="hidden sm:inline">…</span>;
+  if (!data?.user) {
+    return (
+      <Link to="/sign-in" className="rounded-md px-2 py-1 text-foreground hover:underline">
+        Sign in
+      </Link>
+    );
+  }
+  return (
+    <span className="flex items-center gap-2">
+      <span className="hidden max-w-40 truncate sm:inline">{data.user.email}</span>
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          void authClient.signOut();
+        }}
+      >
+        Sign out
+      </Button>
+    </span>
   );
 }

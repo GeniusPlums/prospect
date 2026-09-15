@@ -1,11 +1,13 @@
 import { insertMany, sql, sqlOne } from "@/lib/db";
 import { nid } from "@/lib/ids";
-import { peopleSource } from "@/lib/adapters/registry";
+import { peopleSourceForOrg } from "@/lib/adapters/registry";
 import { cosine, embedText } from "@/lib/embed";
 import { applyFeedbackRerank, proposeIcpDiff, runSearch } from "@/lib/ranking";
 import { getIcp, proposeIcpDiffVersion, type StoredIcp } from "@/lib/icp/engine";
-import { gradeCandidate } from "@/lib/scoring/grade-candidate";
+import { gradeCandidate, gradeFromText } from "@/lib/scoring/grade-candidate";
 import { recordUsage } from "@/lib/billing/meter";
+import { cachedIds, corpusOrgIds } from "@/lib/index/corpus";
+import { persistCollected } from "@/lib/index/persist";
 import { MODEL_VERSIONS, PROMPT_VERSIONS } from "../../../prompts/versions.ts";
 import type { FeedbackVote } from "@/lib/types";
 
@@ -16,15 +18,6 @@ async function emit(searchRunId: string, event: PipelineEvent) {
     `INSERT INTO pipeline_event (id, search_run_id, step, message, counts) VALUES ($1,$2,$3,$4,$5::jsonb)`,
     [nid("evt"), searchRunId, event.step, event.message, JSON.stringify(event.counts ?? {})],
   );
-}
-
-async function cachedIds(orgId: string, externalIds: string[]): Promise<{ hits: string[]; misses: string[] }> {
-  const rows = await sql<{ id: string }>(`SELECT id FROM candidate WHERE org_id=$1`, [orgId]);
-  const have = new Set(rows.map((r) => r.id));
-  return {
-    hits: externalIds.filter((id) => have.has(id)),
-    misses: externalIds.filter((id) => !have.has(id)),
-  };
 }
 
 export async function createSearchRun(input: {
@@ -63,7 +56,7 @@ export async function executeSearchRun(searchId: string): Promise<string> {
   const icp = await getIcp(run.icp_version_id);
   if (!icp) throw new Error("ICP missing");
 
-  const source = peopleSource();
+  const source = await peopleSourceForOrg(run.org_id);
   const hits = await source.search({ icp });
   const ids = hits.map((h) => h.externalId);
 
@@ -81,7 +74,8 @@ export async function executeSearchRun(searchId: string): Promise<string> {
 
   if (misses.length) {
     await emit(searchId, { step: "collect", message: `Collect ${misses.length} misses only` });
-    await source.collect(misses);
+    const collected = await source.collect(misses);
+    await persistCollected(run.org_id, collected, source.name);
     await recordUsage(run.org_id, "profile", misses.length);
     await sql(`UPDATE search_run SET profiles_charged=$2 WHERE id=$1`, [searchId, misses.length]);
   } else {
@@ -90,9 +84,10 @@ export async function executeSearchRun(searchId: string): Promise<string> {
 
   await emit(searchId, { step: "stage1", message: "Hybrid retrieval → working set" });
   const queryVec = embedText([icp.title, icp.summary, ...icp.must, ...icp.skills].join(" "));
+  const [userOrg, sharedOrg] = corpusOrgIds(run.org_id);
   const corpus = await sql<{ id: string; embedding: number[] | string }>(
-    `SELECT id, embedding FROM candidate WHERE org_id=$1`,
-    [run.org_id],
+    `SELECT id, embedding FROM candidate WHERE org_id=$1 OR org_id=$2`,
+    [userOrg, sharedOrg],
   );
   const hybrid = corpus
     .map((row) => {
@@ -109,8 +104,13 @@ export async function executeSearchRun(searchId: string): Promise<string> {
   const graded = runSearch(icp, 22);
   const allowed = new Set(hybrid.map((h) => h.id));
   const shortlist = graded.filter((g) => allowed.has(g.candidateId) || allowed.size === 0);
+  const shortlistIds = new Set(shortlist.map((row) => row.candidateId));
+  const extras = hybrid.filter((row) => !shortlistIds.has(row.id)).slice(0, Math.max(0, 22 - shortlist.length));
 
-  await emit(searchId, { step: "stage2", message: `Rubric grading ${shortlist.length} · prompt ${PROMPT_VERSIONS.gradeRubric}` });
+  await emit(searchId, {
+    step: "stage2",
+    message: `Rubric grading ${shortlist.length + extras.length} · prompt ${PROMPT_VERSIONS.gradeRubric}`,
+  });
   await emit(searchId, { step: "disqualifier", message: "Disqualifier pass (separate)" });
 
   const heldRules = icp.disqualifiers;
@@ -153,6 +153,51 @@ export async function executeSearchRun(searchId: string): Promise<string> {
       heldBack ? null : row.rank,
       heldBack,
       JSON.stringify(heldBack ? row.disqualifiers.map((d) => d.flag) : []),
+    ]);
+    for (const g of detail.criterionGrades) {
+      gradeRows.push([nid("grd"), scoreId, g.criterionId, g.grade, g.evidence]);
+    }
+    for (const obj of detail.reviewerObjections) {
+      objectionRows.push([nid("obj"), scoreId, obj.claim, obj.objection]);
+    }
+  }
+
+  for (const [offset, extra] of extras.entries()) {
+    const stored = await sqlOne<{ display_name: string; headline: string; city: string }>(
+      `SELECT display_name, headline, city FROM candidate WHERE id=$1`,
+      [extra.id],
+    );
+    if (!stored) continue;
+    const signals = await sql<{ body: string }>(`SELECT body FROM signal WHERE candidate_id=$1`, [extra.id]);
+    const detail = gradeFromText({
+      displayName: stored.display_name,
+      headline: stored.headline,
+      city: stored.city,
+      hay: [stored.display_name, stored.headline, stored.city, ...signals.map((s) => s.body)].join(" "),
+      icp,
+    });
+    const scoreId = nid("scr");
+    const rank = shortlist.length + offset + 1;
+    scoreRows.push([
+      scoreId,
+      searchId,
+      extra.id,
+      icp.id,
+      MODEL_VERSIONS.heuristic,
+      PROMPT_VERSIONS.gradeRubric,
+      detail.caseFor,
+      detail.caseAgainst,
+      JSON.stringify(detail.unclear),
+      detail.verdict,
+      detail.disqualified,
+      JSON.stringify(detail.disqualifierFlags),
+      detail.forWeight,
+      detail.againstWeight,
+      detail.unclearWeight,
+      rank,
+      rank,
+      false,
+      JSON.stringify([]),
     ]);
     for (const g of detail.criterionGrades) {
       gradeRows.push([nid("grd"), scoreId, g.criterionId, g.grade, g.evidence]);

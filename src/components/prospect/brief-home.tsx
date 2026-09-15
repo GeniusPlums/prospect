@@ -67,6 +67,9 @@ export function BriefHome() {
       const result = await startFromBrief({ data: { text, sampleId, icp } });
       if (!result.ok) {
         toast.error("error" in result ? result.error : "Could not start search");
+        if ("error" in result && result.error === "Sign in required") {
+          await navigate({ to: "/sign-in" });
+        }
         return;
       }
       await navigate({ to: "/search/$id", params: { id: result.searchId } });

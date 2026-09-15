@@ -25,3 +25,12 @@
 **Why.** A production search took 37s of sequential IAD→Singapore round-trips, so “Find 22 people” looked frozen. Sample cards were SSR buttons with no `href`, so clicks before hydration did nothing.
 
 **Tested.** `npm test` (eval, icp, pipeline split/idempotent, billing, adapters, insertMany). `npm run typecheck`. `npm run eval`.
+
+## 2026-09-15 — Auth, Composio, Groq, Langfuse
+
+**What changed.** Better Auth email/password with org-scoped searches (`org_<userId>`). Warm index stays `org_local` and is visible to every workspace. Composio hosted OAuth on `/connections` for ATS, sourcing, and outreach; collect persists cache misses; reveal/send/ATS write no-op without a live connection (no invented `@example.com`). Briefs go through Groq with Langfuse traces. Secrets stay in Vercel, not git.
+
+**Why.** Ship the product path the brief asked for: real auth, real connectors, real LLM, Postgres as the meter.
+
+**Tested.** `npm test` (20 pass: eval, icp, pipeline cache-hit, billing, adapters waterfall, insertMany, extractJson, composio parse). `npx tsc --noEmit`. `npm run eval` (NDCG@10 ≈ 0.92, P@5 0.70, disqualifier recall 1.0).
+

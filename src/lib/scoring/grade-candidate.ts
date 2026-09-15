@@ -9,6 +9,46 @@ function gradeMust(held: boolean, stuffed: boolean): RubricGrade {
   return held ? "yes" : "no";
 }
 
+export function gradeFromText(input: {
+  displayName: string;
+  headline: string;
+  city: string;
+  hay: string;
+  icp: Icp;
+}) {
+  const hay = input.hay.toLowerCase();
+  const mustGrades = input.icp.must.map((m, i) => {
+    const held = hay.includes(m.slice(0, 8).toLowerCase());
+    return {
+      criterionId: `must-${i}`,
+      grade: gradeMust(held, false),
+      evidence: held ? input.headline.slice(0, 180) : `${input.displayName} does not show ${m}`,
+    };
+  });
+  const yes = mustGrades.filter((g) => g.grade === "yes" || g.grade === "strong_yes").length;
+  const no = mustGrades.filter((g) => g.grade === "no" || g.grade === "strong_no").length;
+  const unclear = input.icp.nice.filter((n) => !hay.includes(n.slice(0, 8).toLowerCase()));
+  const total = Math.max(1, yes + no + unclear.length);
+  return {
+    caseFor: input.headline || `${input.displayName} in ${input.city}`,
+    caseAgainst: no ? "Collected profile is thin versus the ICP musts." : "Limited dossier versus the warm index.",
+    unclear,
+    forWeight: yes / total,
+    againstWeight: no / total,
+    unclearWeight: unclear.length / total,
+    verdict: yes >= no ? ("mixed" as const) : ("weak" as const),
+    disqualified: false,
+    disqualifierFlags: [],
+    criterionGrades: mustGrades,
+    reviewerObjections: [
+      {
+        claim: "Collected profile",
+        objection: "This person came from a connected sourcing tool, not the warm index. Treat evidence as incomplete until reveal.",
+      },
+    ],
+  };
+}
+
 export function gradeCandidate(candidateId: string, icp: Icp) {
   const candidate = getCandidate(candidateId);
   if (!candidate) return null;

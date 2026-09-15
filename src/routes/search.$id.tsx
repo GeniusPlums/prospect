@@ -64,7 +64,13 @@ function SearchPage() {
       setData(first);
       if (first.ok && first.run.status === "running") {
         try {
-          await runSearchPipeline({ data: { id } });
+          const ran = await runSearchPipeline({ data: { id } });
+          if (ran && "ok" in ran && ran.ok === false && !cancelled) {
+            toast.error(ran.error);
+            if (ran.error === "Sign in required") {
+              window.location.href = "/sign-in";
+            }
+          }
         } catch (err) {
           if (!cancelled) toast.error(err instanceof Error ? err.message : "Pipeline failed");
         }
@@ -97,6 +103,9 @@ function SearchPage() {
   }, [id]);
 
   const scores = (data && data.ok ? (data.scores as ScoreRow[]) : []) ?? [];
+  const people = new Map(
+    data && data.ok ? data.people.map((person) => [person.id, person] as const) : [],
+  );
   const open = scores.filter((s) => !s.held_back);
   const held = scores.filter((s) => s.held_back);
   const selected = scores.find((s) => s.candidate_id === selectedId);
@@ -142,6 +151,7 @@ function SearchPage() {
           </p>
           {open.map((row) => {
             const person = getCandidate(row.candidate_id);
+            const name = person?.name ?? people.get(row.candidate_id)?.display_name ?? row.candidate_id;
             return (
               <button
                 key={row.id}
@@ -152,10 +162,10 @@ function SearchPage() {
                   selectedId === row.candidate_id && "bg-accent",
                 )}
               >
-                <PersonAvatar name={person?.name ?? row.candidate_id} />
+                <PersonAvatar name={name} />
                 <span className="min-w-0">
                   <span className="flex items-center gap-2 text-sm font-medium">
-                    #{String(row.final_rank ?? "—").padStart(2, "0")} {person?.name}
+                    #{String(row.final_rank ?? "—").padStart(2, "0")} {name}
                   </span>
                   <span className="block font-mono text-[10px] text-muted-foreground">
                     icp {data.icp?.version} · {row.model_version} · {row.prompt_version}
@@ -169,7 +179,7 @@ function SearchPage() {
               <h2 className="text-xs font-medium text-block">Held back</h2>
               {held.map((row) => (
                 <p key={row.id} className="mt-2 text-sm">
-                  {getCandidate(row.candidate_id)?.name} — {JSON.stringify(row.held_back_rules)}
+                  {getCandidate(row.candidate_id)?.name ?? people.get(row.candidate_id)?.display_name} — {JSON.stringify(row.held_back_rules)}
                 </p>
               ))}
             </section>
@@ -180,6 +190,16 @@ function SearchPage() {
             <DossierPanel
               searchId={id}
               row={selected}
+              name={
+                getCandidate(selected.candidate_id)?.name ??
+                people.get(selected.candidate_id)?.display_name ??
+                selected.candidate_id
+              }
+              headline={
+                getCandidate(selected.candidate_id)?.headline ??
+                people.get(selected.candidate_id)?.headline ??
+                ""
+              }
               objections={objections}
               email={email}
               onVote={async (vote, tags) => {
@@ -197,7 +217,7 @@ function SearchPage() {
               onSend={async () => {
                 const draft = await loadOutreach({ data: { searchId: id, candidateId: selected.candidate_id } });
                 if (!draft || !email) return;
-                await doSend({
+                const sent = await doSend({
                   data: {
                     searchId: id,
                     candidateId: selected.candidate_id,
@@ -207,7 +227,8 @@ function SearchPage() {
                     facts: draft.personalizationFacts,
                   },
                 });
-                toast.success("Queued to inbox");
+                if (sent.ok) toast.success(`Sent via ${sent.via}`);
+                else toast.error(sent.error ?? "Could not send");
               }}
             />
           ) : (
@@ -223,6 +244,8 @@ function DossierPanel({
   row,
   objections,
   email,
+  name,
+  headline,
   onVote,
   onReveal,
   onSend,
@@ -231,11 +254,12 @@ function DossierPanel({
   row: ScoreRow;
   objections: { claim: string; objection: string }[];
   email: string | null;
+  name: string;
+  headline: string;
   onVote: (vote: "up" | "down", tags: string[]) => void;
   onReveal: () => void;
   onSend: () => void;
 }) {
-  const person = getCandidate(row.candidate_id);
   const unclear = (() => {
     if (Array.isArray(row.unclear)) return row.unclear as string[];
     if (typeof row.unclear === "string") {
@@ -251,8 +275,8 @@ function DossierPanel({
   return (
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
-        <h1 className="font-display text-3xl">{person?.name}</h1>
-        <p className="text-sm text-muted-foreground">{person?.headline}</p>
+        <h1 className="font-display text-3xl">{name}</h1>
+        <p className="text-sm text-muted-foreground">{headline}</p>
         <p className="mt-2 font-mono text-[10px] text-muted-foreground">
           icp {row.icp_version_id.slice(-6)} · {row.model_version} · {row.prompt_version}
         </p>
