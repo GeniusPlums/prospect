@@ -15,6 +15,7 @@ import { requireOrg } from "@/lib/auth/session";
 import { loadPeople } from "@/lib/index/corpus";
 import {
   composioConfigured,
+  connectionsForRole,
   hasLaneConnection,
   listHiringCatalog,
   startConnect,
@@ -91,10 +92,12 @@ export const loadSearch = createServerFn({ method: "GET" })
       brief_text: string;
       cache_hits: number;
       cache_misses: number;
+      profiles_charged: number;
       created_at: string;
-    }>(`SELECT id, org_id, status, icp_version_id, brief_text, cache_hits, cache_misses, created_at FROM search_run WHERE id=$1`, [
-      data.id,
-    ]);
+    }>(
+      `SELECT id, org_id, status, icp_version_id, brief_text, cache_hits, cache_misses, profiles_charged, created_at FROM search_run WHERE id=$1`,
+      [data.id],
+    );
     if (!run[0]) return { ok: false as const };
     if (session && run[0].org_id !== session.orgId) return { ok: false as const };
     const icp = await getIcp(run[0].icp_version_id);
@@ -140,7 +143,26 @@ export const loadSearch = createServerFn({ method: "GET" })
       [data.id],
     );
     const people = await loadPeople(scores.map((row) => row.candidate_id));
-    return { ok: true as const, run: run[0], icp, events, scores, objections, feedback, reveals, people };
+    const [atsConnected, outreachConnected] = await Promise.all([
+      hasLaneConnection(run[0].org_id, "ats"),
+      hasLaneConnection(run[0].org_id, "outreach"),
+    ]);
+    return {
+      ok: true as const,
+      run: run[0],
+      icp,
+      events,
+      scores,
+      objections,
+      feedback,
+      reveals,
+      people,
+      gates: {
+        reveal: outreachConnected,
+        send: outreachConnected,
+        ats: atsConnected,
+      },
+    };
   });
 
 export const voteCandidate = createServerFn({ method: "POST" })
@@ -371,15 +393,35 @@ export const listToolkitCatalog = createServerFn({ method: "GET" }).handler(asyn
 
 export const searchReadiness = createServerFn({ method: "GET" }).handler(async () => {
   const session = await org().catch(() => null);
-  if (!session) return { ok: false as const, sourcingConnected: false };
-  return { ok: true as const, sourcingConnected: await hasLaneConnection(session.orgId, "sourcing") };
+  const empty = {
+    sourcingConnected: false,
+    llmConnected: false,
+    atsConnected: false,
+    outreachConnected: false,
+    sourcingToolkit: null as string | null,
+  };
+  if (!session) return { ok: false as const, ...empty };
+  const [sourcing, llm, ats, outreach] = await Promise.all([
+    connectionsForRole(session.orgId, "sourcing"),
+    hasLaneConnection(session.orgId, "llm"),
+    hasLaneConnection(session.orgId, "ats"),
+    hasLaneConnection(session.orgId, "outreach"),
+  ]);
+  return {
+    ok: true as const,
+    sourcingConnected: sourcing.length > 0,
+    llmConnected: llm,
+    atsConnected: ats,
+    outreachConnected: outreach,
+    sourcingToolkit: sourcing[0]?.toolkit ?? null,
+  };
 });
 
 export const connectToolkit = createServerFn({ method: "POST" })
   .validator((input: { toolkit: string; origin: string }) => input)
   .handler(async ({ data }) => {
     const session = await org();
-    const callbackUrl = `${data.origin.replace(/\/$/, "")}/connections`;
+    const callbackUrl = `${data.origin.replace(/\/$/, "")}/connections?connected=1`;
     return startConnect(session.orgId, data.toolkit, callbackUrl);
   });
 

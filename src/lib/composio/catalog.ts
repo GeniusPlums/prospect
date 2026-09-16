@@ -21,10 +21,10 @@ export type ToolkitRef = {
 export const LANE_ORDER: RuntimeRole[] = ["llm", "sourcing", "ats", "outreach"];
 
 export const LANE_LABEL: Record<RuntimeRole, string> = {
-  llm: "LLM / AI / brain",
+  llm: "LLM",
   sourcing: "Sourcing / people",
-  ats: "ATS / HRIS / recruiting",
-  outreach: "Outreach / email / messaging",
+  ats: "ATS / HRIS",
+  outreach: "Outreach / mail",
 };
 
 /** Map Composio category names/slugs to a runtime job. Not a toolkit allowlist. */
@@ -77,14 +77,14 @@ function laneFromKeywords(text: string): RuntimeRole | null {
     return "ats";
   }
   if (
-    /\b(apollo|linkedin|people data labs|\bpdl\b|hunter|coresignal|zoominfo|lusha|contactout|rocketreach|clearbit|fullenrich|dropcontact|proxycurl|snov|cognism|hireez|seekout|people search|talent intel|contact data|email finder|people data)\b/.test(
+    /\b(apollo|linkedin|people data labs|\bpdl\b|coresignal|zoominfo|lusha|contactout|rocketreach|clearbit|fullenrich|dropcontact|proxycurl|snov|cognism|hireez|seekout|people search|talent intel|contact data|people data)\b/.test(
       text,
     )
   ) {
     return "sourcing";
   }
   if (
-    /\b(gmail|outlook|office 365|microsoft 365|microsoft outlook|\bslack\b|microsoft teams|sendgrid|mailgun|postmark|twilio|whatsapp|resend|\binbox\b)\b/.test(
+    /\b(gmail|outlook|office 365|microsoft 365|microsoft outlook|\bslack\b|microsoft teams|sendgrid|mailgun|postmark|twilio|whatsapp|resend|\binbox\b|\bhunter\b|email finder)\b/.test(
       text,
     )
   ) {

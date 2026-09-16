@@ -7,9 +7,15 @@ import { connectToolkit, listConnections, listToolkitCatalog } from "@/lib/serve
 import { LANE_LABEL, LANE_ORDER, type CatalogItem, type RuntimeRole } from "@/lib/composio/catalog";
 import { toast } from "sonner";
 
-export const Route = createFileRoute("/connections")({ component: ConnectionsPage });
+export const Route = createFileRoute("/connections")({
+  validateSearch: (search: Record<string, unknown>): { connected?: string } => ({
+    connected: typeof search.connected === "string" ? search.connected : undefined,
+  }),
+  component: ConnectionsPage,
+});
 
 function ConnectionsPage() {
+  const { connected: justConnected } = Route.useSearch();
   const [data, setData] = useState<Awaited<ReturnType<typeof listConnections>> | null>(null);
   const [items, setItems] = useState<CatalogItem[]>([]);
   const [lane, setLane] = useState<RuntimeRole | "">("");
@@ -43,13 +49,14 @@ function ConnectionsPage() {
   }
 
   useEffect(() => {
+    if (justConnected === "1") toast.success("Returned from hosted OAuth. Refreshing connections…");
     void (async () => {
       const next = await refreshConnections();
       if (next && "ok" in next && next.ok) {
         await loadCatalog();
       }
     })();
-  }, []);
+  }, [justConnected]);
 
   async function onConnect(toolkit: string) {
     setBusy(toolkit);
@@ -100,8 +107,8 @@ function ConnectionsPage() {
         <div>
           <h1 className="font-display text-3xl">Connections</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Live Composio catalog for hiring only: LLMs, sourcing/people data, ATS/HRIS, and outreach. Connect starts
-            hosted OAuth. Runtime uses the first connected toolkit in that lane that can do the job.
+            Live Composio catalog. Hiring lanes only: LLM, sourcing/people, ATS/HRIS, outreach/mail. No Popular. No
+            DevOps. Connect opens hosted OAuth. Tokens stay on Composio.
           </p>
         </div>
         {data && "ok" in data && data.ok === false ? (
@@ -150,7 +157,7 @@ function ConnectionsPage() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Filter toolkits"
+              placeholder="Search toolkits"
               aria-label="Filter toolkits"
             />
             {catalogError ? (
@@ -170,8 +177,9 @@ function ConnectionsPage() {
                         <span>
                           <span className="block text-sm font-medium">{item.label}</span>
                           <span className="text-xs text-muted-foreground">
-                            {item.slug}
-                            {item.blurb ? ` · ${item.blurb}` : ""}
+                            {item.lane === "sourcing" && status !== "active"
+                              ? "Required to search"
+                              : item.blurb || item.slug}
                           </span>
                         </span>
                         {status === "active" ? (

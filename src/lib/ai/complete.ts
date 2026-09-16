@@ -33,7 +33,7 @@ async function groqFallback(input: {
   user: string;
   temperature?: number;
   maxTokens?: number;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; text: string; via: "groq" } | { ok: false; error: string }> {
   const apiKey = process.env.GROQ_API_KEY;
   if (!apiKey) return { ok: false, error: "No LLM connected. Connect one on Connections." };
 
@@ -80,7 +80,7 @@ async function groqFallback(input: {
       },
       metadata: { ms: Date.now() - started },
     });
-    return { ok: true, text };
+    return { ok: true, text, via: "groq" };
   } catch (err) {
     const error = err instanceof Error ? err.message : "Groq request failed";
     trace?.update({ output: error });
@@ -97,7 +97,7 @@ export async function completeJson(input: {
   temperature?: number;
   maxTokens?: number;
   orgId?: string;
-}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+}): Promise<{ ok: true; text: string; via: string } | { ok: false; error: string }> {
   const messages = [
     { role: "system", content: input.system },
     { role: "user", content: input.user },
@@ -124,7 +124,7 @@ export async function completeJson(input: {
         });
         if (result.successful === false) continue;
         const text = extractChatText(result.data);
-        if (text) return { ok: true, text };
+        if (text) return { ok: true, text, via: connection.toolkit };
       }
     }
   }

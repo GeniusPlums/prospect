@@ -22,7 +22,9 @@ const IcpSchema = z.object({
 
 export const parseBrief = createServerFn({ method: "POST" })
   .validator((input: { text: string }) => input)
-  .handler(async ({ data }): Promise<{ ok: true; icp: Icp } | { ok: false; error: string }> => {
+  .handler(async ({ data }): Promise<
+    { ok: true; icp: Icp; via: string; groqFallback: boolean } | { ok: false; error: string }
+  > => {
     const brief = data.text.trim().slice(0, 6000);
     if (brief.length < 20) return { ok: false, error: "Paste a fuller brief — a title alone is not enough." };
 
@@ -42,6 +44,8 @@ export const parseBrief = createServerFn({ method: "POST" })
       const parsed = IcpSchema.parse(extractJson(result.text));
       return {
         ok: true,
+        via: result.via,
+        groqFallback: result.via === "groq",
         icp: {
           ...parsed,
           seniority: parsed.seniority as Seniority,

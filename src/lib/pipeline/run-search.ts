@@ -14,6 +14,23 @@ import type { FeedbackVote } from "@/lib/types";
 
 export type PipelineEvent = { step: string; message: string; counts?: Record<string, number> };
 
+/** Honest collect log. Empty search never claims a warm-index hit. */
+export function collectSkipMessage(input: {
+  cacheHits: number;
+  cacheMisses: number;
+  collected: number;
+  quota: number;
+  evalOnly: boolean;
+}): string {
+  if (input.collected > 0) return `Collect ${input.collected} cache misses`;
+  if (input.cacheMisses > 0 && input.quota <= 0) return "Collect skipped — profile quota exhausted";
+  if (input.cacheHits === 0 && input.cacheMisses === 0) {
+    return "No people IDs from the connected toolkit — nothing to cache or collect";
+  }
+  if (input.evalOnly) return "Collect skipped — local eval index already had these IDs";
+  return "Collect skipped — these IDs were already in your org cache";
+}
+
 async function emit(searchRunId: string, event: PipelineEvent) {
   await sql(
     `INSERT INTO pipeline_event (id, search_run_id, step, message, counts) VALUES ($1,$2,$3,$4,$5::jsonb)`,
@@ -59,9 +76,16 @@ export async function executeSearchRun(searchId: string): Promise<string> {
 
   const evalOnly = run.org_id === DEV_ORG;
   const source = await peopleSourceForOrg(run.org_id);
+  await emit(searchId, {
+    step: "search",
+    message:
+      source.name === "none"
+        ? "Sourcing not connected — there is no list"
+        : `Finding via ${source.name}`,
+  });
   let hits: { externalId: string; cacheKey: string }[] = [];
   try {
-    hits = await source.search({ icp });
+    hits = source.name === "none" ? [] : await source.search({ icp });
   } catch (err) {
     await emit(searchId, {
       step: "search",
@@ -87,24 +111,41 @@ export async function executeSearchRun(searchId: string): Promise<string> {
   const toCollect = misses.slice(0, capCollect(wantCollect, quota, 22));
   const candidateIds = cacheHits.map((row) => row.candidateId);
 
+  let collectedCount = 0;
   if (toCollect.length) {
-    await emit(searchId, { step: "collect", message: `Collect ${toCollect.length} cache misses` });
     const collected = await source.collect(toCollect);
+    collectedCount = collected.length;
     const persisted = await persistCollected(run.org_id, collected, source.name);
     candidateIds.push(...persisted);
     await recordUsage(run.org_id, "profile", collected.length);
     await sql(`UPDATE search_run SET profiles_charged=$2 WHERE id=$1`, [searchId, collected.length]);
-  } else if (misses.length && quota <= 0) {
-    await emit(searchId, { step: "collect", message: "Collect skipped — profile quota exhausted" });
-  } else {
-    await emit(searchId, { step: "collect", message: "Collect skipped — warm index hit" });
+  }
+  await emit(searchId, {
+    step: "collect",
+    message: collectSkipMessage({
+      cacheHits: cacheHits.length,
+      cacheMisses: misses.length,
+      collected: collectedCount,
+      quota,
+      evalOnly,
+    }),
+    counts: { collect: collectedCount, spendProfiles: collectedCount },
+  });
+  if (collectedCount > 0) {
+    await emit(searchId, {
+      step: "spend",
+      message: `Spend this run · ${collectedCount} profiles charged`,
+      counts: { profiles: collectedCount },
+    });
   }
 
   const uniqueIds = [...new Set(candidateIds)];
   if (uniqueIds.length === 0) {
     const message = evalOnly
       ? "No people in the eval index for this brief"
-      : "No people yet. Connect a sourcing toolkit on Connections, then search again.";
+      : source.name === "none"
+        ? "Sourcing not connected — there is no list"
+        : `No one passed from ${source.name}. That is the result. We do not pad the list.`;
     await emit(searchId, { step: "done", message });
     await sql(`UPDATE search_run SET status='done', completed_at=now() WHERE id=$1`, [searchId]);
     return searchId;
@@ -133,6 +174,15 @@ export async function executeSearchRun(searchId: string): Promise<string> {
     dossiers: ranked,
     useLlm: !evalOnly,
   });
+  const via = [...grades.values()].find((row) => row.modelVersion)?.modelVersion;
+  if (!evalOnly && via === "groq-fallback") {
+    await emit(searchId, {
+      step: "llm",
+      message: "Grading used Groq last-resort fallback — no LLM connected",
+    });
+  } else if (!evalOnly && via && via !== "heuristic.v1") {
+    await emit(searchId, { step: "llm", message: `Grading via ${via}` });
+  }
 
   const scoreRows: unknown[][] = [];
   const gradeRows: unknown[][] = [];

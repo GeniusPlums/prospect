@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { PipelineRun } from "@/components/prospect/pipeline";
 import { Button } from "@/components/ui/button";
-import { loadSearch, runSearchPipeline, voteCandidate, doReveal, loadOutreach, doSend } from "@/lib/server/fns";
+import { loadSearch, runSearchPipeline, voteCandidate, doReveal, loadOutreach, doSend, acceptProposedIcp, atsWrite } from "@/lib/server/fns";
 import { PersonAvatar } from "@/components/prospect/avatar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -46,6 +46,7 @@ function SearchPage() {
   const [data, setData] = useState<Awaited<ReturnType<typeof loadSearch>> | null>(null);
   const [selectedId, setSelectedId] = useState<string | undefined>();
   const [email, setEmail] = useState<string | null>(null);
+  const [proposedId, setProposedId] = useState<string | null>(null);
 
   async function refresh() {
     const next = await loadSearch({ data: { id } });
@@ -146,15 +147,11 @@ function SearchPage() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside className="flex w-full flex-col overflow-y-auto border-r border-border lg:w-96">
           <p className="px-4 py-3 font-mono text-[10px] text-muted-foreground">
-            cache {data.run.cache_hits} hit / {data.run.cache_misses} miss
+            cache {data.run.cache_hits} hit / {data.run.cache_misses} miss · spend {data.run.profiles_charged} profiles
           </p>
           {open.length === 0 ? (
             <p className="px-4 py-6 text-sm text-muted-foreground">
-              No shortlist yet. Connect a sourcing toolkit on{" "}
-              <Link to="/connections" className="underline">
-                Connections
-              </Link>{" "}
-              and run the search again.
+              No one passed. That is the result. We do not pad the list.
             </p>
           ) : null}
           {open.map((row) => {
@@ -201,11 +198,22 @@ function SearchPage() {
               headline={people.get(selected.candidate_id)?.headline ?? ""}
               objections={objections}
               email={email}
+              gates={data.ok ? data.gates : { reveal: false, send: false, ats: false }}
+              proposedId={proposedId}
+              onAcceptProposed={async () => {
+                if (!proposedId) return;
+                await acceptProposedIcp({ data: { icpId: proposedId } });
+                setProposedId(null);
+                toast.success("Proposed ICP accepted as a new version");
+              }}
               onVote={async (vote, tags) => {
                 const res = await voteCandidate({
                   data: { searchId: id, candidateId: selected.candidate_id, vote: { vote, tags } },
                 });
-                if (res.proposed) toast.message("ICP change proposed — accept in Rules");
+                if (res.proposed) {
+                  setProposedId(res.proposed.id);
+                  toast.message("ICP change proposed from this vote. Accept it on this search — not on Rules.");
+                }
                 await refresh();
               }}
               onReveal={async () => {
@@ -229,6 +237,11 @@ function SearchPage() {
                 if (sent.ok) toast.success(`Sent via ${sent.via}`);
                 else toast.error(sent.error ?? "Could not send");
               }}
+              onAts={async () => {
+                const res = await atsWrite({ data: { candidateId: selected.candidate_id } });
+                if (res.ok) toast.success(`Created in ${res.toolkit}`);
+                else toast.error(res.error);
+              }}
             />
           ) : (
             <p className="text-sm text-muted-foreground">Open the strongest match.</p>
@@ -245,9 +258,13 @@ function DossierPanel({
   email,
   name,
   headline,
+  gates,
+  proposedId,
+  onAcceptProposed,
   onVote,
   onReveal,
   onSend,
+  onAts,
 }: {
   searchId: string;
   row: ScoreRow;
@@ -255,9 +272,13 @@ function DossierPanel({
   email: string | null;
   name: string;
   headline: string;
+  gates: { reveal: boolean; send: boolean; ats: boolean };
+  proposedId: string | null;
+  onAcceptProposed: () => void;
   onVote: (vote: "up" | "down", tags: string[]) => void;
   onReveal: () => void;
   onSend: () => void;
+  onAts: () => void;
 }) {
   const unclear = (() => {
     if (Array.isArray(row.unclear)) return row.unclear as string[];
@@ -279,7 +300,20 @@ function DossierPanel({
         <p className="mt-2 font-mono text-[10px] text-muted-foreground">
           icp {row.icp_version_id.slice(-6)} · {row.model_version} · {row.prompt_version}
         </p>
+        {row.model_version === "groq-fallback" ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            Graded with Groq last-resort fallback — no LLM connected.
+          </p>
+        ) : null}
       </div>
+      {proposedId ? (
+        <div className="rounded-xl border border-border bg-card p-3 text-sm">
+          <p>A new ICP version was proposed from your vote. Rules is org-wide musts, not this diff.</p>
+          <Button className="mt-2" size="sm" onClick={() => void onAcceptProposed()}>
+            Accept proposed ICP
+          </Button>
+        </div>
+      ) : null}
       <VerdictBar forW={row.for_weight} againstW={row.against_weight} unclearW={row.unclear_weight} />
       <section className="border-l-2 border-for pl-4">
         <h2 className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Case for</h2>
@@ -305,21 +339,29 @@ function DossierPanel({
           </p>
         ))}
       </aside>
+      <p className="text-sm text-muted-foreground">
+        {email ? email : "Email not invented. Reveal after an outreach / contact toolkit is connected."}
+      </p>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => onVote("up", ["strong signal"])}>Keep</Button>
         <Button variant="outline" onClick={() => onVote("down", ["skills miss"])}>
           Pass
         </Button>
-        <Button variant="secondary" onClick={() => void onReveal()}>
+        <Button variant="secondary" disabled={!gates.reveal} onClick={() => void onReveal()}>
           Reveal contact
         </Button>
-        {email ? (
-          <Button variant="outline" onClick={() => void onSend()}>
-            Send from inbox
-          </Button>
-        ) : null}
+        <Button variant="outline" disabled={!gates.send || !email} onClick={() => void onSend()}>
+          Send via inbox
+        </Button>
+        <Button variant="outline" disabled={!gates.ats} onClick={() => void onAts()}>
+          Create in ATS
+        </Button>
       </div>
-      {email ? <p className="font-mono text-sm">{email}</p> : null}
+      {!gates.reveal || !gates.send || !gates.ats ? (
+        <p className="text-xs text-muted-foreground">
+          Reveal, send, and ATS stay closed until those lanes are connected on Connections.
+        </p>
+      ) : null}
     </div>
   );
 }

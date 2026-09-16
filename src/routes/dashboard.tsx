@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
-import { dashboard, tickAlwaysOn } from "@/lib/server/fns";
-import { Button } from "@/components/ui/button";
+import { dashboard } from "@/lib/server/fns";
 
 export const Route = createFileRoute("/dashboard")({ component: DashPage });
 
@@ -19,7 +18,9 @@ function DashPage() {
         <section>
           <h2 className="text-sm font-medium">Cache hit rate</h2>
           <p className="mt-2 font-mono text-sm text-muted-foreground">
-            {cache?.rate == null ? "Unknown until real query patterns exist." : `${Math.round(cache.rate * 100)}% (${cache.hits} / ${cache.hits + cache.misses})`}
+            {cache?.rate == null
+              ? "Unknown until real query patterns exist."
+              : `${Math.round(cache.rate * 100)}% (${cache.hits} / ${cache.hits + cache.misses})`}
           </p>
         </section>
         <section>
@@ -45,10 +46,12 @@ function DashPage() {
         <section>
           <h2 className="text-sm font-medium">Outcome calibration</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Working, uncalibrated. Falls back to exemplar-only until real hires exist.
+            Hidden until real hires exist. We do not show a working calibration from static copy.
           </p>
         </section>
-        <Button onClick={() => void tickAlwaysOn()}>Run always-on (agent add-on)</Button>
+        <p className="text-sm text-muted-foreground">
+          Always-on search is not shipped. The old control only wrote a log row, so it is disabled.
+        </p>
       </main>
     </AppShell>
   );

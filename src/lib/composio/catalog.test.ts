@@ -7,6 +7,7 @@ import {
   roleFromCategoryText,
   toHiringCatalogItem,
   toolkitLane,
+  LANE_LABEL,
   ROLE_NEEDLES,
 } from "./catalog.ts";
 
@@ -49,6 +50,10 @@ describe("composio catalog roles", () => {
     assert.equal(toHiringCatalogItem({ slug: "anthropic", label: "Anthropic" })?.lane, "llm");
     assert.equal(toHiringCatalogItem({ slug: "gmail", label: "Gmail" })?.lane, "outreach");
     assert.equal(toHiringCatalogItem({ slug: "apollo", label: "Apollo" })?.lane, "sourcing");
+    assert.equal(toHiringCatalogItem({ slug: "hunter", label: "Hunter" })?.lane, "outreach");
+    assert.equal(LANE_LABEL.llm, "LLM");
+    assert.equal(LANE_LABEL.ats, "ATS / HRIS");
+    assert.equal(LANE_LABEL.outreach, "Outreach / mail");
   });
 
   it("excludes devops-like slugs even if Popular is the first category", () => {

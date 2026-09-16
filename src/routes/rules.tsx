@@ -20,7 +20,8 @@ function RulesPage() {
       <main className="mx-auto max-w-xl space-y-4 px-4 py-10">
         <h1 className="font-display text-3xl">Org hiring rules</h1>
         <p className="text-sm text-muted-foreground">
-          Inherited into every role ICP. Versions are immutable; this write is a new accepted version.
+          Inherited into every role ICP. Versions are immutable; this write is a new accepted version. Vote-proposed
+          role diffs are accepted on the search page, not here.
         </p>
         {current ? (
           <pre className="rounded-lg bg-secondary p-3 font-mono text-xs">{JSON.stringify(current, null, 2)}</pre>

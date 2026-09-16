@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
-import { dashboard, runBillingCron, tickAlwaysOn } from "@/lib/server/fns";
+import { dashboard, runBillingCron } from "@/lib/server/fns";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/settings")({ component: SettingsPage });
@@ -28,10 +28,11 @@ function SettingsPage() {
         </p>
         <div className="flex gap-2">
           <Button onClick={() => void runBillingCron()}>Run billing cron</Button>
-          <Button variant="outline" onClick={() => void tickAlwaysOn()}>
-            Meter an agent run
-          </Button>
         </div>
+        <p className="text-sm text-muted-foreground">
+          Agent always-on is not shipped. Metering an agent run from this page would only write a log row, so that
+          control is gone.
+        </p>
         <ul className="text-sm text-muted-foreground">
           {(data?.automations ?? []).map((a) => (
             <li key={a.id}>

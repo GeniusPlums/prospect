@@ -1,9 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
-import { connectAts, atsWrite } from "@/lib/server/fns";
-import { Link } from "@tanstack/react-router";
+import { connectAts } from "@/lib/server/fns";
 
 export const Route = createFileRoute("/ats")({ component: AtsPage });
 
@@ -18,12 +17,10 @@ function AtsPage() {
           <Link to="/connections" className="underline">
             Connections
           </Link>
-          . Nothing is invented when nothing is connected.
+          . Writes happen from a shortlist person, never a fixture like Aditya Iyer. Nothing is invented when nothing
+          is connected.
         </p>
         <Button onClick={() => void connectAts().then(setData)}>Sync connected ATS</Button>
-        <Button variant="outline" onClick={() => void atsWrite({ data: { candidateId: "aditya-iyer" } }).then(setData)}>
-          Write sourced candidate
-        </Button>
         {data ? <pre className="overflow-auto font-mono text-xs">{JSON.stringify(data, null, 2)}</pre> : null}
       </main>
     </AppShell>

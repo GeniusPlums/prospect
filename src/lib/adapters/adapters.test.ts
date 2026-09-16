@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { peopleSource, contactWaterfall } from "./registry.ts";
+import { peopleSource, peopleSourceForOrg, contactWaterfall } from "./registry.ts";
 import { localSource } from "./profile-source/active.ts";
 import { capCollect } from "./profile-source/people-query.ts";
 import { ensureDbReady } from "@/lib/db";
@@ -27,6 +27,16 @@ describe("profile_source adapters", () => {
     assert.equal(capCollect(40, 5, 22), 5);
     assert.equal(capCollect(40, 300, 22), 22);
     assert.equal(capCollect(0, 300, 22), 0);
+  });
+
+  it("user orgs without a sourcing toolkit get an empty people source", async () => {
+    await ensureDbReady();
+    const source = await peopleSourceForOrg("org_user_no_source");
+    assert.equal(source.name, "none");
+    const hits = await source.search({});
+    assert.equal(hits.length, 0);
+    const collected = await source.collect(["aditya-iyer"]);
+    assert.equal(collected.length, 0);
   });
 
   it("contact waterfall does not invent an email", async () => {

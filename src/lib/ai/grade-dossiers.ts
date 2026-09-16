@@ -72,7 +72,7 @@ export async function gradeDossiers(input: {
           reviewerObjections: grade.reviewerObjections.length
             ? grade.reviewerObjections
             : prior.reviewerObjections,
-          modelVersion: "connected-llm",
+            modelVersion: result.via === "groq" ? "groq-fallback" : result.via,
         });
       }
     } catch {

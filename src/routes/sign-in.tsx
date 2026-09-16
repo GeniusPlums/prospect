@@ -5,11 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth/client";
 
-export const Route = createFileRoute("/sign-in")({ component: SignInPage });
+export const Route = createFileRoute("/sign-in")({
+  validateSearch: (search: Record<string, unknown>): { mode?: "in" | "up" } => ({
+    mode: search.mode === "up" || search.mode === "in" ? search.mode : undefined,
+  }),
+  component: SignInPage,
+});
 
 function SignInPage() {
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"in" | "up">("in");
+  const { mode: modeFromUrl } = Route.useSearch();
+  const [mode, setMode] = useState<"in" | "up">(modeFromUrl ?? "in");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -29,7 +35,7 @@ function SignInPage() {
         setError(result.error.message ?? "Could not sign in");
         return;
       }
-      await navigate({ to: "/" });
+      await navigate({ to: mode === "up" ? "/connections" : "/" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not sign in");
     } finally {
@@ -42,7 +48,7 @@ function SignInPage() {
       <main className="mx-auto max-w-md space-y-6 px-4 py-16">
         <h1 className="font-display text-3xl">{mode === "up" ? "Create workspace" : "Sign in"}</h1>
         <p className="text-sm text-muted-foreground">
-          Email and password on this app. Connect hiring tools on Connections — LLM, sourcing, ATS, or outreach.
+          Email on this app. Hiring tools on Connections next. Search is not unlocked here.
         </p>
         <form className="space-y-3" onSubmit={(event) => void onSubmit(event)}>
           {mode === "up" ? (
@@ -78,7 +84,7 @@ function SignInPage() {
           {mode === "up" ? "Already have an account? Sign in" : "New here? Create an account"}
         </button>
         <p className="text-xs text-muted-foreground">
-          <Link to="/">Back to source</Link>
+          <Link to="/">Back</Link>
         </p>
       </main>
     </AppShell>

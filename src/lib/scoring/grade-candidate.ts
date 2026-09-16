@@ -31,7 +31,7 @@ export function gradeFromText(input: {
   const total = Math.max(1, yes + no + unclear.length);
   return {
     caseFor: input.headline || `${input.displayName} in ${input.city}`,
-    caseAgainst: no ? "Collected profile is thin versus the ICP musts." : "Limited dossier versus the warm index.",
+    caseAgainst: no ? "Collected profile is thin versus the ICP musts." : "Limited dossier versus the stated musts.",
     unclear,
     forWeight: yes / total,
     againstWeight: no / total,
@@ -43,7 +43,7 @@ export function gradeFromText(input: {
     reviewerObjections: [
       {
         claim: "Collected profile",
-        objection: "This person came from a connected sourcing tool, not the warm index. Treat evidence as incomplete until reveal.",
+        objection: "This person was graded from a collected or cached dossier. Treat evidence as incomplete until reveal.",
       },
     ],
   };

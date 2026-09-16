@@ -2,12 +2,26 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ensureDbReady } from "@/lib/db";
 import { writeIcpVersion } from "@/lib/icp/engine";
-import { createAndRunSearch, createSearchRun, executeSearchRun } from "./run-search.ts";
+import { createAndRunSearch, createSearchRun, executeSearchRun, collectSkipMessage } from "./run-search.ts";
 import { sampleBriefs } from "@/lib/data/sample-briefs";
 import { sql } from "@/lib/db";
 import { DEV_ORG } from "@/lib/ids";
 
 describe("pipeline", () => {
+  it("empty search never logs a warm index hit", () => {
+    assert.match(
+      collectSkipMessage({ cacheHits: 0, cacheMisses: 0, collected: 0, quota: 300, evalOnly: false }),
+      /nothing to cache or collect/,
+    );
+    assert.doesNotMatch(
+      collectSkipMessage({ cacheHits: 0, cacheMisses: 0, collected: 0, quota: 300, evalOnly: false }),
+      /warm index/i,
+    );
+    assert.match(
+      collectSkipMessage({ cacheHits: 4, cacheMisses: 0, collected: 0, quota: 300, evalOnly: true }),
+      /local eval index/,
+    );
+  });
   it("cache-hits the warm index and does not collect", async () => {
     await ensureDbReady();
     const icp = await writeIcpVersion({
@@ -84,5 +98,11 @@ describe("pipeline", () => {
       [id],
     );
     assert.equal(Number(scores[0]?.n ?? 0), 0);
+    const events = await sql<{ message: string }>(
+      `SELECT message FROM pipeline_event WHERE search_run_id=$1`,
+      [id],
+    );
+    assert.ok(!events.some((row) => /warm index/i.test(row.message)));
+    assert.ok(events.some((row) => /nothing to cache or collect|there is no list|No one passed/i.test(row.message)));
   });
 });

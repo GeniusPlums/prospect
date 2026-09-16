@@ -1,5 +1,13 @@
 # Implementation log
 
+## 2026-09-16 — Honest UX journey (Connect-first)
+
+**What changed.** After sign-up the first product screen is Connections (live Composio hiring lanes only: LLM, sourcing/people, ATS/HRIS, outreach/mail — no Popular, no DevOps). Source is locked until a people toolkit is connected; role/ICP stay closed and the 36-person eval fixtures are never shown to user orgs. Home CTA is **Find a shortlist**. Finding names the toolkit, logs cache vs collect vs spend, and never writes “warm index hit” on an empty search. Reveal/send/ATS stay gated on those lanes. Groq is labeled as last-resort fallback when no LLM is connected. Tester lies removed: always-on (log-only), ATS write of `aditya-iyer`, dashboard calibration static copy, Rules toast for vote-proposed ICPs.
+
+**Why.** Prospect is the harness. Users connect tools; empty is allowed.
+
+**Tested.** `npm test` (lock empty source without toolkit; catalog lanes exclude Popular/DevOps; Hunter is outreach not search; user orgs do not rank fixtures; empty search events omit warm-index). `npx tsc --noEmit`.
+
 ## 2026-09-16 — Live hiring Connections (no Popular lie)
 
 **What changed.** Connections fetches the real Composio toolkit catalog (`toolkits.list` / `toolkits.get` query, not category chips as a fake list). “Popular” is not a Prospect filter — Composio’s Popular/DevOps/cloud/database categories are dropped. The page groups live results into LLM, sourcing/people, ATS/HRIS, and outreach, with search. Connect calls `startConnect` and redirects to hosted OAuth or shows the real error. Catalog failure renders “Could not load Composio catalog” plus the error, never a dummy list. Runtime picks the first connected toolkit in a lane (category + keywords, not a slug allowlist). Home search stays locked until a sourcing toolkit is connected.
