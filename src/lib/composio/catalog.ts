@@ -4,6 +4,8 @@ export type CatalogItem = {
   blurb: string;
   category: string;
   lane: RuntimeRole;
+  connectable: boolean;
+  connectError?: string;
 };
 
 export type CatalogCategory = { id: string; name: string };
@@ -16,6 +18,8 @@ export type ToolkitRef = {
   blurb?: string;
   category?: string;
   categories?: { name?: string; slug?: string; id?: string }[];
+  noAuth?: boolean;
+  managedAuth?: string[];
 };
 
 export const LANE_ORDER: RuntimeRole[] = ["llm", "sourcing", "ats", "outreach"];
@@ -106,15 +110,30 @@ export function toolkitLane(ref: ToolkitRef): RuntimeRole | null {
   return null;
 }
 
+export function connectability(ref: { noAuth?: boolean; managedAuth?: string[] }): {
+  connectable: boolean;
+  connectError?: string;
+} {
+  if (ref.noAuth) return { connectable: true };
+  if (ref.managedAuth && ref.managedAuth.length > 0) return { connectable: true };
+  if (ref.managedAuth && ref.managedAuth.length === 0) {
+    return { connectable: false, connectError: "No hosted OAuth for this tool" };
+  }
+  return { connectable: true };
+}
+
 export function toHiringCatalogItem(ref: ToolkitRef): CatalogItem | null {
   const lane = toolkitLane(ref);
   if (!lane) return null;
+  const auth = connectability(ref);
   return {
     slug: ref.slug,
     label: ref.label || ref.slug,
     blurb: ref.blurb ?? "",
     category: LANE_LABEL[lane],
     lane,
+    connectable: auth.connectable,
+    connectError: auth.connectError,
   };
 }
 
@@ -129,10 +148,94 @@ export function extractToolkitRows(listed: unknown): Record<string, unknown>[] {
 }
 
 export function catalogCursor(page: unknown): string | null {
-  if (!page || typeof page !== "object") return null;
+  if (!page || typeof page !== "object" || Array.isArray(page)) return null;
   const rec = page as Record<string, unknown>;
   const value = rec.nextCursor ?? rec.next_cursor;
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** SDK `toolkits.get({})` returns an array and drops next_cursor — never page with a slug. */
+export function catalogListCursor(listed: unknown): string | null {
+  return catalogCursor(listed);
+}
+
+export function isPopularScanCategory(text: string): boolean {
+  const t = text.toLowerCase().replace(/[_-]/g, " ");
+  return /\bpopular\b|\btrending\b|\bfeatured\b/.test(t);
+}
+
+/** Category ids to fetch. Popular is scanned for named hiring apps; DevOps is not. */
+export function hiringScanCategoryIds(categories: CatalogCategory[]): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const category of categories) {
+    if (!category.id) continue;
+    const text = `${category.id} ${category.name}`;
+    if (!roleFromCategoryText(text) && !isPopularScanCategory(text)) continue;
+    if (seen.has(category.id)) continue;
+    seen.add(category.id);
+    ids.push(category.id);
+  }
+  return ids;
+}
+
+export const FALLBACK_HIRING_CATEGORY_IDS = ["ai-models", "human-resources", "email", "communication"];
+
+export function refsFromToolkitList(listed: unknown): ToolkitRef[] {
+  return extractToolkitRows(listed)
+    .map(mapToolkitRow)
+    .filter((row): row is ToolkitRef => Boolean(row));
+}
+
+export function mergeHiringItems(refs: ToolkitRef[]): CatalogItem[] {
+  const seen = new Map<string, CatalogItem>();
+  for (const ref of refs) {
+    const item = toHiringCatalogItem(ref);
+    if (item) seen.set(item.slug, item);
+  }
+  return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
+export async function collectCategoryPages(
+  listPage: (query: { category?: string; cursor?: string }) => Promise<unknown>,
+  category?: string,
+): Promise<ToolkitRef[]> {
+  const out: ToolkitRef[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  do {
+    const listed = await listPage({ category, cursor });
+    out.push(...refsFromToolkitList(listed));
+    cursor = catalogListCursor(listed) ?? undefined;
+    pages += 1;
+  } while (cursor && pages < 8);
+  return out;
+}
+
+export async function collectHiringCatalog(deps: {
+  listCategories: () => Promise<CatalogCategory[]>;
+  listPage: (query: { category?: string; cursor?: string }) => Promise<unknown>;
+}): Promise<CatalogItem[]> {
+  let categories: CatalogCategory[] = [];
+  try {
+    categories = await deps.listCategories();
+  } catch {
+    categories = [];
+  }
+  const scanIds = hiringScanCategoryIds(categories);
+  const targets: Array<string | undefined> = scanIds.length > 0 ? scanIds : [...FALLBACK_HIRING_CATEGORY_IDS, undefined];
+  const settled = await Promise.allSettled(targets.map((category) => collectCategoryPages(deps.listPage, category)));
+  const refs: ToolkitRef[] = [];
+  const errors: Error[] = [];
+  for (const result of settled) {
+    if (result.status === "fulfilled") refs.push(...result.value);
+    else errors.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
+  }
+  const items = mergeHiringItems(refs);
+  if (items.length === 0) {
+    throw errors[0] ?? new Error("No hiring tools were returned");
+  }
+  return items;
 }
 
 export function mapToolkitRow(row: Record<string, unknown>): ToolkitRef | null {
@@ -148,12 +251,17 @@ export function mapToolkitRow(row: Record<string, unknown>): ToolkitRef | null {
     (typeof row.description === "string" && row.description) ||
     categories.map((c) => c.name).filter(Boolean).join(" · ") ||
     "";
+  const managedAuth = Array.isArray(row.composioManagedAuthSchemes)
+    ? row.composioManagedAuthSchemes.filter((value): value is string => typeof value === "string")
+    : undefined;
   return {
     slug,
     label: name,
     blurb,
     category: categories[0]?.name ?? "",
     categories,
+    noAuth: row.noAuth === true,
+    managedAuth,
   };
 }
 

@@ -77,7 +77,7 @@ export function BriefHome() {
         if ("error" in result && result.error === "Sign in required") {
           await navigate({ to: "/sign-in" });
         }
-        if ("error" in result && String(result.error).includes("Connect a sourcing")) {
+        if ("error" in result && /people source|No sourcing|no runnable sourcing/i.test(String(result.error))) {
           await navigate({ to: "/connections" });
         }
         return;
@@ -144,10 +144,9 @@ export function BriefHome() {
         <main className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
           <h1 className="font-display text-3xl">Source</h1>
           <div className="mt-6 rounded-2xl border border-border bg-card p-6">
-            <h2 className="font-medium">Sourcing not connected</h2>
+            <h2 className="font-medium">People source cannot search</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Connect a people toolkit before you can search. Role and ICP stay closed until then. There is no
-              list, and we will not show the eval fixtures.
+              {ready.sourcingError || "Connect a people source before you can search. Role and ICP stay closed until then."}
             </p>
             <Button asChild className="mt-5">
               <Link to="/connections">Go to Connections</Link>
@@ -184,12 +183,12 @@ export function BriefHome() {
             <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
               <span className="font-medium">{icp.title}</span>
               <span className="rounded-full border border-border px-2 py-0.5 text-xs">
-                {ready.sourcingToolkit ?? "Sourcing"} connected
+                {ready.sourcingToolkit ?? "Sourcing"} signed in
               </span>
             </div>
             {groqNote || !ready.llmConnected ? (
               <p className="mb-4 text-sm text-muted-foreground">
-                Groq is last-resort fallback only — no LLM toolkit is connected. Connect one on{" "}
+                Groq is last-resort fallback only — no LLM we can call. Connect one on{" "}
                 <Link to="/connections" className="underline">
                   Connections
                 </Link>{" "}
@@ -214,12 +213,12 @@ export function BriefHome() {
             {icp?.title ?? "Role and ICP"}
           </h1>
           <p className="mt-5 max-w-xl text-base text-muted-foreground">
-            {ready.sourcingToolkit ?? "Sourcing"} is connected. Cache first, collect on miss, spend visible. Empty
+            {ready.sourcingToolkit ?? "Sourcing"} can search. Cache first, collect on miss, spend visible. Empty
             shortlists are allowed.
           </p>
           {!ready.llmConnected ? (
             <p className="mt-3 text-sm text-muted-foreground">
-              No LLM connected — briefs may use Groq as last-resort fallback.
+              No LLM we can call — briefs may use Groq as last-resort fallback.
             </p>
           ) : null}
           <div className="mt-6">

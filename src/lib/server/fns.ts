@@ -15,8 +15,7 @@ import { requireOrg } from "@/lib/auth/session";
 import { loadPeople } from "@/lib/index/corpus";
 import {
   composioConfigured,
-  connectionsForRole,
-  hasLaneConnection,
+  laneCanRun,
   listHiringCatalog,
   startConnect,
   syncOrgConnections,
@@ -47,11 +46,11 @@ export const startFromBrief = createServerFn({ method: "POST" })
       if (!parsed.ok) return { ok: false as const, error: parsed.error };
       icp = parsed.icp;
     }
-    const sourcing = await hasLaneConnection(session.orgId, "sourcing");
-    if (!sourcing) {
+    const sourcing = await laneCanRun(session.orgId, "sourcing");
+    if (!sourcing.ok) {
       return {
         ok: false as const,
-        error: "Connect a sourcing toolkit on Connections before searching.",
+        error: sourcing.error || "Connect a people source on Connections before searching.",
       };
     }
     const stored = await writeIcpVersion({
@@ -143,9 +142,9 @@ export const loadSearch = createServerFn({ method: "GET" })
       [data.id],
     );
     const people = await loadPeople(scores.map((row) => row.candidate_id));
-    const [atsConnected, outreachConnected] = await Promise.all([
-      hasLaneConnection(run[0].org_id, "ats"),
-      hasLaneConnection(run[0].org_id, "outreach"),
+    const [ats, outreach] = await Promise.all([
+      laneCanRun(run[0].org_id, "ats"),
+      laneCanRun(run[0].org_id, "outreach"),
     ]);
     return {
       ok: true as const,
@@ -158,9 +157,9 @@ export const loadSearch = createServerFn({ method: "GET" })
       reveals,
       people,
       gates: {
-        reveal: outreachConnected,
-        send: outreachConnected,
-        ats: atsConnected,
+        reveal: outreach.ok,
+        send: outreach.ok,
+        ats: ats.ok,
       },
     };
   });
@@ -360,11 +359,11 @@ export const listConnections = createServerFn({ method: "GET" }).handler(async (
     };
   }
   const connections = await syncOrgConnections(session.orgId);
-  const sourcingConnected = await hasLaneConnection(session.orgId, "sourcing");
+  const sourcing = await laneCanRun(session.orgId, "sourcing");
   return {
     ok: true as const,
     configured: composioConfigured(),
-    sourcingConnected,
+    sourcingConnected: sourcing.ok,
     lanes,
     connections,
   };
@@ -385,7 +384,7 @@ export const listToolkitCatalog = createServerFn({ method: "GET" }).handler(asyn
   } catch (err) {
     return {
       ok: false as const,
-      error: err instanceof Error ? err.message : "Could not load Composio catalog",
+      error: err instanceof Error ? err.message : "Could not load your tools",
       items: [] as Awaited<ReturnType<typeof listHiringCatalog>>["items"],
     };
   }
@@ -399,21 +398,25 @@ export const searchReadiness = createServerFn({ method: "GET" }).handler(async (
     atsConnected: false,
     outreachConnected: false,
     sourcingToolkit: null as string | null,
+    sourcingError: null as string | null,
+    llmError: null as string | null,
   };
   if (!session) return { ok: false as const, ...empty };
   const [sourcing, llm, ats, outreach] = await Promise.all([
-    connectionsForRole(session.orgId, "sourcing"),
-    hasLaneConnection(session.orgId, "llm"),
-    hasLaneConnection(session.orgId, "ats"),
-    hasLaneConnection(session.orgId, "outreach"),
+    laneCanRun(session.orgId, "sourcing"),
+    laneCanRun(session.orgId, "llm"),
+    laneCanRun(session.orgId, "ats"),
+    laneCanRun(session.orgId, "outreach"),
   ]);
   return {
     ok: true as const,
-    sourcingConnected: sourcing.length > 0,
-    llmConnected: llm,
-    atsConnected: ats,
-    outreachConnected: outreach,
-    sourcingToolkit: sourcing[0]?.toolkit ?? null,
+    sourcingConnected: sourcing.ok,
+    llmConnected: llm.ok,
+    atsConnected: ats.ok,
+    outreachConnected: outreach.ok,
+    sourcingToolkit: sourcing.ok ? sourcing.toolkit ?? null : null,
+    sourcingError: sourcing.ok ? null : sourcing.error,
+    llmError: llm.ok ? null : llm.error,
   };
 });
 

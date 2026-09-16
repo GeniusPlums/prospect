@@ -1,6 +1,6 @@
 import { Langfuse } from "langfuse";
-import { connectionsForRole, executeIntent, pickToolSlug } from "@/lib/composio/client";
-import { ROLE_NEEDLES } from "@/lib/composio/catalog";
+import { connectionsForRole, executeIntent, listToolkitTools } from "@/lib/composio/client";
+import { pickToolForIntent } from "@/lib/composio/bind";
 import { extractChatText } from "@/lib/composio/parse";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -106,15 +106,22 @@ export async function completeJson(input: {
   if (input.orgId) {
     const connections = await connectionsForRole(input.orgId, "llm");
     for (const connection of connections) {
-      const slug = await pickToolSlug(connection.toolkit, ROLE_NEEDLES.llm);
-      if (!slug) continue;
+      const tools = await listToolkitTools(connection.toolkit);
       for (const model of MODEL_TRIES) {
+        const picked = pickToolForIntent(tools, "llm_chat", {
+          model,
+          messages,
+          temperature: input.temperature ?? 0.2,
+          max_tokens: input.maxTokens ?? 1200,
+          max_completion_tokens: input.maxTokens ?? 1200,
+        });
+        if (!picked.ok) continue;
         const result = await executeIntent({
           orgId: input.orgId,
           toolkit: connection.toolkit,
           connectedAccountId: connection.connected_account_id,
-          needles: ["chat", "completion"],
-          arguments: {
+          intent: "llm_chat",
+          facts: {
             model,
             messages,
             temperature: input.temperature ?? 0.2,

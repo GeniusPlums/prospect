@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  catalogCursor,
+  catalogListCursor,
+  collectHiringCatalog,
   extractToolkitRows,
+  hiringScanCategoryIds,
   mapToolkitRow,
   roleFromCategories,
   roleFromCategoryText,
   toHiringCatalogItem,
   toolkitLane,
   LANE_LABEL,
-  ROLE_NEEDLES,
 } from "./catalog.ts";
 
 describe("composio catalog roles", () => {
@@ -84,10 +87,86 @@ describe("composio catalog roles", () => {
     assert.equal(hiring[0]?.slug, "openai");
   });
 
-  it("exposes needles per role rather than toolkit slugs", () => {
-    assert.ok(ROLE_NEEDLES.llm.includes("chat"));
-    assert.ok(ROLE_NEEDLES.sourcing.includes("people"));
-    assert.ok(ROLE_NEEDLES.ats.includes("candidate"));
-    assert.ok(ROLE_NEEDLES.outreach.includes("send"));
+  it("marks tools without managed auth as not connectable", () => {
+    const blocked = toHiringCatalogItem({
+      slug: "greenhouse",
+      label: "Greenhouse",
+      managedAuth: [],
+    });
+    assert.equal(blocked?.connectable, false);
+    assert.equal(blocked?.connectError, "No hosted OAuth for this tool");
+    const hosted = toHiringCatalogItem({
+      slug: "gmail",
+      label: "Gmail",
+      managedAuth: ["OAUTH2"],
+    });
+    assert.equal(hosted?.connectable, true);
+  });
+
+  it("scans hiring and Popular categories but not DevOps", () => {
+    assert.deepEqual(
+      hiringScanCategoryIds([
+        { id: "popular", name: "Popular" },
+        { id: "developer-tools", name: "Developer Tools" },
+        { id: "ai-models", name: "AI Models" },
+        { id: "human-resources", name: "Human Resources" },
+      ]),
+      ["popular", "ai-models", "human-resources"],
+    );
+  });
+
+  it("does not treat a full SDK array as a cursor page keyed by the last slug", async () => {
+    const queries: { category?: string; cursor?: string }[] = [];
+    const page = Array.from({ length: 100 }, (_, index) => ({
+      slug: index === 99 ? "gmail" : `app${index}`,
+      name: index === 99 ? "Gmail" : `App ${index}`,
+      meta: { categories: [{ name: "Email", slug: "email" }] },
+    }));
+    assert.equal(catalogCursor(page), null);
+    assert.equal(catalogListCursor(page), null);
+    const items = await collectHiringCatalog({
+      listCategories: async () => [{ id: "email", name: "Email" }],
+      listPage: async (query) => {
+        queries.push(query);
+        if (query.cursor) throw new Error("Failed to fetch toolkits");
+        return page;
+      },
+    });
+    assert.equal(queries.length, 1);
+    assert.equal(queries[0]?.cursor, undefined);
+    assert.ok(items.some((item) => item.slug === "gmail" && item.lane === "outreach"));
+  });
+
+  it("follows a real nextCursor from a paginated object", async () => {
+    const queries: { category?: string; cursor?: string }[] = [];
+    const items = await collectHiringCatalog({
+      listCategories: async () => [{ id: "email", name: "Email" }],
+      listPage: async (query) => {
+        queries.push(query);
+        if (!query.cursor) {
+          return { items: [{ slug: "gmail", name: "Gmail", meta: { categories: [{ name: "Email" }] } }], nextCursor: "page-2" };
+        }
+        return { items: [{ slug: "outlook", name: "Outlook", meta: { categories: [{ name: "Email" }] } }], nextCursor: null };
+      },
+    });
+    assert.equal(queries.length, 2);
+    assert.equal(queries[1]?.cursor, "page-2");
+    assert.deepEqual(
+      items.map((item) => item.slug).sort(),
+      ["gmail", "outlook"],
+    );
+  });
+});
+
+describe("live hiring catalog", () => {
+  it("lists hiring lanes from the API when COMPOSIO_API_KEY is set", { skip: !process.env.COMPOSIO_API_KEY }, async () => {
+    const { listHiringCatalog } = await import("./client.ts");
+    const listed = await listHiringCatalog();
+    assert.ok(listed.items.length > 0, "expected hiring tools from the live catalog");
+    const lanes = new Set(listed.items.map((item) => item.lane));
+    for (const item of listed.items) {
+      assert.ok(["llm", "sourcing", "ats", "outreach"].includes(item.lane));
+    }
+    assert.ok(lanes.size >= 1);
   });
 });

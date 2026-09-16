@@ -37,12 +37,12 @@ function ConnectionsPage() {
     try {
       const page = await listToolkitCatalog();
       if (!page.ok) {
-        setCatalogError(page.error || "Could not load Composio catalog");
+        setCatalogError(page.error || "Could not load your tools");
         return;
       }
       setItems(page.items);
     } catch (err) {
-      setCatalogError(err instanceof Error ? err.message : "Could not load Composio catalog");
+      setCatalogError(err instanceof Error ? err.message : "Could not load your tools");
     } finally {
       setLoadingCatalog(false);
     }
@@ -67,7 +67,7 @@ function ConnectionsPage() {
         return;
       }
       if ("alreadyConnected" in result && result.alreadyConnected) {
-        toast.success("Already connected");
+        toast.success("Already signed in");
         await refreshConnections();
         return;
       }
@@ -75,7 +75,7 @@ function ConnectionsPage() {
         window.location.href = result.redirectUrl;
         return;
       }
-      toast.error("Composio did not return a hosted auth URL");
+      toast.error("No hosted auth URL was returned");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start connect");
     } finally {
@@ -107,8 +107,8 @@ function ConnectionsPage() {
         <div>
           <h1 className="font-display text-3xl">Connections</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Live Composio catalog. Hiring lanes only: LLM, sourcing/people, ATS/HRIS, outreach/mail. No Popular. No
-            DevOps. Connect opens hosted OAuth. Tokens stay on Composio.
+            Connect a people source, an inbox, an ATS, and an LLM. Connect opens hosted OAuth. If a tool cannot
+            sign in, you will see that error — not a fake Connect.
           </p>
         </div>
         {data && "ok" in data && data.ok === false ? (
@@ -120,12 +120,12 @@ function ConnectionsPage() {
           </p>
         ) : null}
         {data && "configured" in data && data.ok && !data.configured ? (
-          <p className="text-sm text-muted-foreground">Composio is not configured on this deployment.</p>
+          <p className="text-sm text-muted-foreground">Connections are not configured on this deployment.</p>
         ) : null}
 
         {connected.size > 0 ? (
           <section className="space-y-3">
-            <h2 className="text-sm font-medium uppercase tracking-[0.14em] text-muted-foreground">Connected</h2>
+            <h2 className="text-sm font-medium uppercase tracking-[0.14em] text-muted-foreground">Accounts</h2>
             <ul className="divide-y divide-border rounded-xl border border-border bg-card">
               {[...connected.entries()].map(([slug, status]) => (
                 <li key={slug} className="flex items-center justify-between gap-3 px-4 py-3">
@@ -157,12 +157,12 @@ function ConnectionsPage() {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search toolkits"
-              aria-label="Filter toolkits"
+              placeholder="Search your tools"
+              aria-label="Filter tools"
             />
             {catalogError ? (
               <p className="text-sm text-destructive">
-                Could not load Composio catalog
+                Could not load your tools
                 {catalogError ? `: ${catalogError}` : "."}
               </p>
             ) : null}
@@ -183,7 +183,11 @@ function ConnectionsPage() {
                           </span>
                         </span>
                         {status === "active" ? (
-                          <span className="font-mono text-[10px] text-muted-foreground">connected</span>
+                          <span className="font-mono text-[10px] text-muted-foreground">signed in</span>
+                        ) : !item.connectable ? (
+                          <span className="max-w-[14rem] text-right text-xs text-destructive">
+                            {item.connectError || "Cannot connect"}
+                          </span>
                         ) : (
                           <Button
                             size="sm"
@@ -200,9 +204,9 @@ function ConnectionsPage() {
                 </ul>
               </section>
             ))}
-            {loadingCatalog ? <p className="text-sm text-muted-foreground">Loading Composio catalog…</p> : null}
+            {loadingCatalog ? <p className="text-sm text-muted-foreground">Loading your tools…</p> : null}
             {!loadingCatalog && !catalogError && items.length > 0 && grouped.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No hiring toolkits match that filter.</p>
+              <p className="text-sm text-muted-foreground">No hiring tools match that filter.</p>
             ) : null}
           </>
         ) : null}

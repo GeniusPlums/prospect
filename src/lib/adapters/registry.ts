@@ -51,19 +51,19 @@ export async function contactWaterfall(input: {
   if (connections.length === 0) return { attempts, hit: null };
 
   for (const connection of connections) {
-    const result = await executeIntent({
-      orgId: input.orgId,
-      toolkit: connection.toolkit,
-      connectedAccountId: connection.connected_account_id,
-      needles: ["email", "find"],
-      arguments: {
-        full_name: input.name,
-        name: input.name,
-        domain: input.domain ?? "",
-        company: input.domain ?? "",
-      },
-    });
-    if (result.successful === false && result.error?.startsWith("No ")) {
+      const result = await executeIntent({
+        orgId: input.orgId,
+        toolkit: connection.toolkit,
+        connectedAccountId: connection.connected_account_id,
+        intent: "email_find",
+        facts: {
+          full_name: input.name,
+          name: input.name,
+          domain: input.domain ?? "",
+          company: input.domain ?? "",
+        },
+      });
+      if (result.successful === false && result.error?.startsWith("No ")) {
       attempts.push({ provider: connection.toolkit, outcome: "skipped_no_email_tool", costUsd: 0 });
       continue;
     }
@@ -87,14 +87,14 @@ export async function verifyEmail(email: string): Promise<boolean> {
 }
 
 export async function mergeAtsFetch(orgId: string) {
-  const connection = await firstActiveForRole(orgId, "ats", ["list", "candidate"]);
+  const connection = await firstActiveForRole(orgId, "ats", "ats_list");
   if (!connection) return [];
   const result = await executeIntent({
     orgId,
     toolkit: connection.toolkit,
     connectedAccountId: connection.connected_account_id,
-    needles: ["list", "candidate"],
-    arguments: { per_page: 20, limit: 20 },
+    intent: "ats_list",
+    facts: { per_page: 20, limit: 20 },
   });
   return parseAtsPeople(result.data).map((person) => ({
     ...person,
@@ -102,19 +102,18 @@ export async function mergeAtsFetch(orgId: string) {
   }));
 }
 
-export async function writeAtsRemote(orgId: string, candidateName: string, payload: unknown) {
-  const connection = await firstActiveForRole(orgId, "ats", ["create", "candidate"]);
+export async function writeAtsRemote(orgId: string, candidateName: string, _payload: unknown) {
+  const connection = await firstActiveForRole(orgId, "ats", "ats_create");
   if (!connection) return { ok: false as const, error: "Connect an ATS on Connections first" };
   const result = await executeIntent({
     orgId,
     toolkit: connection.toolkit,
     connectedAccountId: connection.connected_account_id,
-    needles: ["create", "candidate"],
-    arguments: {
+    intent: "ats_create",
+    facts: {
       name: candidateName,
       first_name: candidateName.split(" ")[0],
       last_name: candidateName.split(" ").slice(1).join(" ") || candidateName,
-      payload,
     },
   });
   if (result.successful === false) {
@@ -129,14 +128,14 @@ export async function sendViaConnectedInbox(input: {
   subject: string;
   body: string;
 }): Promise<{ via: string; ok: boolean; error?: string }> {
-  const connection = await firstActiveForRole(input.orgId, "outreach");
+  const connection = await firstActiveForRole(input.orgId, "outreach", "send_email");
   if (!connection) return { via: "none", ok: false, error: "Connect an inbox on Connections to send" };
   const result = await executeIntent({
     orgId: input.orgId,
     toolkit: connection.toolkit,
     connectedAccountId: connection.connected_account_id,
-    needles: ["send", "email"],
-    arguments: {
+    intent: "send_email",
+    facts: {
       to: input.to,
       recipient_email: input.to,
       subject: input.subject,

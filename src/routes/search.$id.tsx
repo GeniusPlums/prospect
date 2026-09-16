@@ -302,7 +302,7 @@ function DossierPanel({
         </p>
         {row.model_version === "groq-fallback" ? (
           <p className="mt-2 text-sm text-muted-foreground">
-            Graded with Groq last-resort fallback — no LLM connected.
+            Graded with Groq last-resort fallback — no LLM we can call.
           </p>
         ) : null}
       </div>
@@ -340,7 +340,7 @@ function DossierPanel({
         ))}
       </aside>
       <p className="text-sm text-muted-foreground">
-        {email ? email : "Email not invented. Reveal after an outreach / contact toolkit is connected."}
+        {email ? email : "Email not invented. Reveal stays closed until an inbox tool can actually run."}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button onClick={() => onVote("up", ["strong signal"])}>Keep</Button>
@@ -359,7 +359,7 @@ function DossierPanel({
       </div>
       {!gates.reveal || !gates.send || !gates.ats ? (
         <p className="text-xs text-muted-foreground">
-          Reveal, send, and ATS stay closed until those lanes are connected on Connections.
+          Reveal, send, and ATS stay closed until those lanes can actually run.
         </p>
       ) : null}
     </div>

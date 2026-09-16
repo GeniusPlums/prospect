@@ -3,7 +3,7 @@ import { firstActiveForRole, executeIntent } from "@/lib/composio/client";
 import { parsePeople } from "@/lib/composio/parse";
 
 export async function composioPeopleSource(orgId: string): Promise<PeopleSource | null> {
-  const connection = await firstActiveForRole(orgId, "sourcing");
+  const connection = await firstActiveForRole(orgId, "sourcing", "people_search");
   if (!connection) return null;
 
   const extras = new Map<string, CollectedProfile>();
@@ -16,14 +16,16 @@ export async function composioPeopleSource(orgId: string): Promise<PeopleSource 
         orgId,
         toolkit: connection.toolkit,
         connectedAccountId: connection.connected_account_id,
-        needles: ["search", "people"],
-        arguments: {
+        intent: "people_search",
+        facts: {
           q: [icp?.title, ...(icp?.skills ?? []).slice(0, 4)].filter(Boolean).join(" "),
           query: icp?.title ?? "",
           keywords: (icp?.skills ?? []).slice(0, 6).join(", "),
           location: icp?.locations?.[0] ?? "India",
+          limit: 20,
         },
       });
+      if (result.successful === false) return [];
       const people = parsePeople(result.data);
       for (const person of people) {
         extras.set(person.externalId, {
@@ -53,19 +55,21 @@ export async function composioPeopleSource(orgId: string): Promise<PeopleSource 
           orgId,
           toolkit: connection.toolkit,
           connectedAccountId: connection.connected_account_id,
-          needles: ["get", "person"],
-          arguments: { ids: missing, id: missing[0] },
+          intent: "person_get",
+          facts: { ids: missing, id: missing[0] },
         });
-        for (const person of parsePeople(result.data)) {
-          fromSearch.push({
-            externalId: person.externalId,
-            linkedinUrl: person.linkedinUrl,
-            displayName: person.displayName,
-            headline: person.headline,
-            city: person.city,
-            years: person.years,
-            raw: person.raw,
-          });
+        if (result.successful !== false) {
+          for (const person of parsePeople(result.data)) {
+            fromSearch.push({
+              externalId: person.externalId,
+              linkedinUrl: person.linkedinUrl,
+              displayName: person.displayName,
+              headline: person.headline,
+              city: person.city,
+              years: person.years,
+              raw: person.raw,
+            });
+          }
         }
       }
       return fromSearch;

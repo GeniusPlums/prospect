@@ -1,5 +1,13 @@
 # Implementation log
 
+## 2026-09-16 — Prove catalog, OAuth, and tool calls (or fail honestly)
+
+**What changed.** Catalog lists hiring-lane tools via `toolkits.get({category,limit,cursor})`. The SDK returns a bare array and drops `next_cursor`; we stopped paging with the last slug (that was `Failed to fetch toolkits`). Connect only offers hosted OAuth when the toolkit has managed auth; otherwise the row shows `No hosted OAuth for this tool`. After sign-in, lanes are runnable only if we can load the tool list, pick a matching tool, and bind required fields from the real JSON schema — no needle-guessed slug and no dumped argument bag. Source / reveal / send / ATS stay closed when that bind fails. Product copy does not say Composio.
+
+**Why.** OAuth “connected” was a lie if we could not call a people-search / chat / send / ATS tool with valid args.
+
+**Tested.** `npm test` (schema bind: aliases, missing required, people-search vs send-email; catalog: no slug-as-cursor, no DevOps, no hosted OAuth when managed auth is empty). `npx tsc --noEmit`. Live COMPOSIO_API_KEY pull from Vercel CLI came back empty locally, so production catalog is proven by the pagination fix + deploy, not a local live hit.
+
 ## 2026-09-16 — Honest UX journey (Connect-first)
 
 **What changed.** After sign-up the first product screen is Connections (live Composio hiring lanes only: LLM, sourcing/people, ATS/HRIS, outreach/mail — no Popular, no DevOps). Source is locked until a people toolkit is connected; role/ICP stay closed and the 36-person eval fixtures are never shown to user orgs. Home CTA is **Find a shortlist**. Finding names the toolkit, logs cache vs collect vs spend, and never writes “warm index hit” on an empty search. Reveal/send/ATS stay gated on those lanes. Groq is labeled as last-resort fallback when no LLM is connected. Tester lies removed: always-on (log-only), ATS write of `aditya-iyer`, dashboard calibration static copy, Rules toast for vote-proposed ICPs.

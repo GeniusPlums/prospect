@@ -2,16 +2,20 @@ import { Composio } from "@composio/core";
 import { sql, sqlOne } from "@/lib/db";
 import { nid } from "@/lib/ids";
 import {
-  catalogCursor,
-  extractToolkitRows,
-  mapToolkitRow,
-  toHiringCatalogItem,
+  collectHiringCatalog,
   toolkitLane,
-  ROLE_NEEDLES,
   type CatalogCategory,
   type CatalogItem,
   type RuntimeRole,
 } from "./catalog";
+import {
+  errorMessage,
+  pickToolForIntent,
+  ROLE_PROBE_FACTS,
+  toolFromRaw,
+  type ToolIntent,
+  type ToolSchema,
+} from "./bind";
 
 let cached: Composio | undefined;
 
@@ -61,11 +65,22 @@ export async function startConnect(orgId: string, toolkit: string, callbackUrl: 
     return { ok: false as const, error: "Unknown toolkit" };
   }
   try {
-    await getComposio().toolkits.get(slug);
-  } catch {
-    return { ok: false as const, error: "Composio does not list that toolkit" };
+    const meta = await getComposio().toolkits.get(slug);
+    const managed = meta.composioManagedAuthSchemes;
+    if (Array.isArray(managed) && managed.length === 0) {
+      return { ok: false as const, error: "No hosted OAuth for this tool" };
+    }
+  } catch (err) {
+    return { ok: false as const, error: errorMessage(err) };
   }
-  const authConfigId = await ensureAuthConfig(slug);
+
+  let authConfigId: string;
+  try {
+    authConfigId = await ensureAuthConfig(slug);
+  } catch (err) {
+    return { ok: false as const, error: errorMessage(err) };
+  }
+
   const existing = await sqlOne<{ connected_account_id: string; status: string }>(
     `SELECT connected_account_id, status FROM org_connection WHERE org_id=$1 AND toolkit=$2`,
     [orgId, slug],
@@ -81,7 +96,7 @@ export async function startConnect(orgId: string, toolkit: string, callbackUrl: 
     });
     const connectedAccountId = link.id;
     const redirectUrl = link.redirectUrl;
-    if (!connectedAccountId) return { ok: false as const, error: "Composio did not return a connection id" };
+    if (!connectedAccountId) return { ok: false as const, error: "No connection id was returned" };
 
     await sql(
       `INSERT INTO org_connection (id, org_id, toolkit, connected_account_id, auth_config_id, status)
@@ -89,7 +104,7 @@ export async function startConnect(orgId: string, toolkit: string, callbackUrl: 
        ON CONFLICT (org_id, toolkit) DO UPDATE SET connected_account_id=$4, auth_config_id=$5, status='pending'`,
       [nid("cnx"), orgId, slug, connectedAccountId, authConfigId],
     );
-    if (!redirectUrl) return { ok: false as const, error: "Composio did not return a hosted auth URL" };
+    if (!redirectUrl) return { ok: false as const, error: "No hosted auth URL was returned" };
     return { ok: true as const, alreadyConnected: false as const, redirectUrl, connectedAccountId };
   } catch (err) {
     const listed = await getComposio().connectedAccounts.list({
@@ -107,7 +122,7 @@ export async function startConnect(orgId: string, toolkit: string, callbackUrl: 
       );
       return { ok: true as const, alreadyConnected: true as const, connectedAccountId: active.id };
     }
-    return { ok: false as const, error: err instanceof Error ? err.message : "Could not start Composio connect" };
+    return { ok: false as const, error: errorMessage(err) };
   }
 }
 
@@ -186,12 +201,54 @@ export async function hasLaneConnection(orgId: string, role: RuntimeRole) {
   return (await connectionsForRole(orgId, role)).length > 0;
 }
 
-export async function firstActiveForRole(orgId: string, role: RuntimeRole, needles = ROLE_NEEDLES[role]) {
+export const ROLE_INTENT: Record<RuntimeRole, ToolIntent> = {
+  llm: "llm_chat",
+  sourcing: "people_search",
+  ats: "ats_create",
+  outreach: "send_email",
+};
+
+export async function firstActiveForRole(orgId: string, role: RuntimeRole, intent: ToolIntent = ROLE_INTENT[role]) {
   for (const row of await connectionsForRole(orgId, role)) {
-    const slug = await pickToolSlug(row.toolkit, needles);
-    if (slug) return row;
+    try {
+      const tools = await listToolkitTools(row.toolkit);
+      const probe = ROLE_PROBE_FACTS[intent] ?? {};
+      const picked = pickToolForIntent(tools, intent, probe);
+      if (picked.ok) return row;
+    } catch {
+      continue;
+    }
   }
   return undefined;
+}
+
+export async function laneCanRun(
+  orgId: string,
+  role: RuntimeRole,
+): Promise<{ ok: boolean; toolkit?: string; error: string }> {
+  const intents: ToolIntent[] = role === "ats" ? ["ats_list", "ats_create"] : [ROLE_INTENT[role]];
+  const connections = await connectionsForRole(orgId, role);
+  if (connections.length === 0) {
+    return { ok: false, error: `No ${role} account is signed in` };
+  }
+  const errors: string[] = [];
+  for (const row of connections) {
+    try {
+      const tools = await listToolkitTools(row.toolkit);
+      for (const intent of intents) {
+        const picked = pickToolForIntent(tools, intent, ROLE_PROBE_FACTS[intent] ?? {});
+        if (picked.ok) return { ok: true, toolkit: row.toolkit, error: "" };
+        errors.push(`${row.toolkit}: ${picked.error}`);
+      }
+    } catch (err) {
+      errors.push(`${row.toolkit}: ${errorMessage(err)}`);
+    }
+  }
+  return {
+    ok: false,
+    toolkit: connections[0]?.toolkit,
+    error: errors[0] ?? `Signed in to ${connections[0]?.toolkit ?? role}, but no runnable ${role} tool`,
+  };
 }
 
 export async function executeTool(input: {
@@ -210,51 +267,46 @@ export async function executeTool(input: {
   return result;
 }
 
-const slugCache = new Map<string, string[]>();
+const toolCache = new Map<string, ToolSchema[]>();
 
-export async function listToolkitSlugs(toolkit: string): Promise<string[]> {
-  const hit = slugCache.get(toolkit);
+export async function listToolkitTools(toolkit: string): Promise<ToolSchema[]> {
+  const hit = toolCache.get(toolkit);
   if (hit) return hit;
-  const tools = await getComposio().tools.getRawComposioTools({ toolkits: [toolkit], limit: 100 });
-  const slugs = tools.map((tool) => tool.slug).filter(Boolean);
-  slugCache.set(toolkit, slugs);
-  return slugs;
-}
-
-export async function pickToolSlug(toolkit: string, needles: string[]): Promise<string | undefined> {
-  if (!composioConfigured()) return undefined;
-  try {
-    const slugs = await listToolkitSlugs(toolkit);
-    const ranked = slugs
-      .map((slug) => {
-        const lower = slug.toLowerCase();
-        const score = needles.reduce((sum, needle) => sum + (lower.includes(needle.toLowerCase()) ? 1 : 0), 0);
-        return { slug, score };
-      })
-      .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score);
-    return ranked[0]?.slug;
-  } catch {
-    return undefined;
-  }
+  if (!composioConfigured()) return [];
+  const raw = await getComposio().tools.getRawComposioTools({ toolkits: [toolkit], limit: 100 });
+  const tools = raw.map(toolFromRaw).filter((row): row is ToolSchema => Boolean(row));
+  toolCache.set(toolkit, tools);
+  return tools;
 }
 
 export async function executeIntent(input: {
   orgId: string;
   toolkit: string;
   connectedAccountId: string;
-  needles: string[];
-  arguments: Record<string, unknown>;
+  intent: ToolIntent;
+  facts: Record<string, unknown>;
 }) {
-  const slug = await pickToolSlug(input.toolkit, input.needles);
-  if (!slug) return { successful: false as const, error: `No ${input.toolkit} tools available`, data: null };
+  let tools: ToolSchema[];
   try {
-    const result = await executeTool({ ...input, slug, arguments: input.arguments });
+    tools = await listToolkitTools(input.toolkit);
+  } catch (err) {
+    return { successful: false as const, error: errorMessage(err), data: null };
+  }
+  const picked = pickToolForIntent(tools, input.intent, input.facts);
+  if (!picked.ok) return { successful: false as const, error: picked.error, data: null };
+  try {
+    const result = await executeTool({
+      orgId: input.orgId,
+      toolkit: input.toolkit,
+      connectedAccountId: input.connectedAccountId,
+      slug: picked.tool.slug,
+      arguments: picked.args,
+    });
     return result;
   } catch (err) {
     return {
       successful: false as const,
-      error: err instanceof Error ? err.message : "Tool execute failed",
+      error: errorMessage(err),
       data: null,
     };
   }
@@ -269,60 +321,24 @@ export async function listCatalogCategories(): Promise<CatalogCategory[]> {
   }).filter((item) => item.id);
 }
 
-type ToolkitLister = {
-  get: (query: unknown) => Promise<unknown>;
-  list?: (query: unknown) => Promise<unknown>;
-};
-
-async function fetchToolkitList(query: Record<string, unknown>): Promise<unknown> {
-  const toolkits = getComposio().toolkits as unknown as ToolkitLister;
-  if (typeof toolkits.list === "function") return toolkits.list(query);
-  return toolkits.get(query);
-}
-
-async function listRawCatalogPage(input: { category?: string; cursor?: string }): Promise<{
-  rows: ReturnType<typeof mapToolkitRow>[];
-  nextCursor: string | null;
-}> {
-  const query: Record<string, unknown> = { limit: 100, sortBy: "alphabetically" };
-  if (input.category) query.category = input.category;
-  if (input.cursor) query.cursor = input.cursor;
-  const listed = await fetchToolkitList(query);
-  const rows = extractToolkitRows(listed).map(mapToolkitRow);
-  const nextFromPage = catalogCursor(listed);
-  const filled = rows.filter(Boolean);
-  const nextFromFullPage =
-    !nextFromPage && filled.length >= 100 ? filled[filled.length - 1]?.slug ?? null : null;
-  return { rows, nextCursor: nextFromPage ?? nextFromFullPage };
-}
-
-async function collectPages(category?: string): Promise<ReturnType<typeof mapToolkitRow>[]> {
-  const out: ReturnType<typeof mapToolkitRow>[] = [];
-  let cursor: string | undefined;
-  let pages = 0;
-  do {
-    const page = await listRawCatalogPage({ category, cursor });
-    out.push(...page.rows);
-    cursor = page.nextCursor ?? undefined;
-    pages += 1;
-  } while (cursor && pages < 16);
-  return out;
+async function listToolkitPage(query: { category?: string; cursor?: string }): Promise<unknown> {
+  return getComposio().toolkits.get({
+    limit: 100,
+    sortBy: "alphabetically",
+    ...(query.category ? { category: query.category } : {}),
+    ...(query.cursor ? { cursor: query.cursor } : {}),
+  });
 }
 
 export async function listHiringCatalog(): Promise<{ items: CatalogItem[]; nextCursor: null }> {
   if (!composioConfigured()) throw new Error("COMPOSIO_API_KEY is not set");
-  const seen = new Map<string, CatalogItem>();
-  const refs = await collectPages();
-  for (const ref of refs) {
-    if (!ref) continue;
-    const item = toHiringCatalogItem(ref);
-    if (item) seen.set(item.slug, item);
+  try {
+    const items = await collectHiringCatalog({
+      listCategories: listCatalogCategories,
+      listPage: listToolkitPage,
+    });
+    return { items, nextCursor: null };
+  } catch (err) {
+    throw new Error(errorMessage(err));
   }
-
-  if (seen.size === 0) {
-    throw new Error("Composio returned no hiring toolkits");
-  }
-
-  const items = [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
-  return { items, nextCursor: null };
 }

@@ -164,7 +164,7 @@ export function OutreachComposer({
           </Button>
         </div>
         <p className="mt-2 text-xs text-muted-foreground">
-          Sends through Gmail or Outlook if you have one connected in Grok.
+          Sends through a signed-in inbox on Connections, or fails with that tool’s error.
         </p>
       </div>
     </div>
