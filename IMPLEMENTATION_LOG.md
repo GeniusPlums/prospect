@@ -1,5 +1,13 @@
 # Implementation log
 
+## 2026-09-16 — Connections: Connect for OAuth and API key, stop hiding hiring tools
+
+**What changed.** Catalog no longer treats empty `composioManagedAuthSchemes` as “cannot connect.” SDK list items expose `authSchemes` + `composioManagedAuthSchemes`; retrieve exposes `authConfigDetails[].mode`. API_KEY / BEARER / managed auth still get a Connect button that calls `connectedAccounts.link`. Connect does not invent “No hosted OAuth.” Hiring-adjacent categories (CRM, calendar, social, sales, AI, HR, email) are scanned, plus an unfiltered usage-sorted page, plus slug probes for Apollo/Gmail/Greenhouse/OpenAI-class tools so a Coresignal-only category page cannot hide them. Source stays locked until a people-search tool binds the real JSON schema; a failed people search throws the real error instead of returning an empty list. UI copy is OAuth-or-API-key, no “Required to search,” no vendor name.
+
+**Why.** Production Connections showed only Coresignal / DeBounce / RocketReach with a dead “No hosted OAuth” CTA. Lane + category filters never fetched CRM/mail/ATS/LLM apps, and empty hosted-OAuth arrays blocked API-key tools. Sourcing was untestable.
+
+**Tested.** `npx tsc --noEmit`. `npm test` (44 pass, 1 skip): empty OAuth + `API_KEY` is connectable; Coresignal-only merge fails if Apollo is in the fixture; probes restore Apollo/Gmail/Greenhouse/OpenAI; `startConnectFlow` returns a mocked hosted redirect URL and surfaces the real link error. Live `COMPOSIO_API_KEY` via `vercel env pull` is empty locally (name present, value length 0), so live slug counts are proven on production after deploy, not from this machine. No Prospect Playwright suite (`pnpm e2e:full` is Astrazen-only).
+
 ## 2026-09-16 — Paper desk, not vibe-coded SaaS
 
 **What changed.** Restyled the live app against Yakko’s “vibe-coded website” process: a product metaphor (junior-recruiter desk / gazette) that the whole site shares, not a unique asset on a generic template. Paper cream, navy ink, vermillion stamp; Newsreader + Source Serif; sharp edges; slim Source/Searches/Connections nav with More. Landing is editorial (no feature-grid hero). Unsigned landing paints immediately. Connections is a ledger with dashed empty/error/sign-in states. Honest-ux-journey canvas screens match. No Composio in UI copy.

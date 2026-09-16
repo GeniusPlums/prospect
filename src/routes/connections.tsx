@@ -50,7 +50,7 @@ function ConnectionsPage() {
   }
 
   useEffect(() => {
-    if (justConnected === "1") toast.success("Returned from hosted OAuth. Refreshing connections…");
+    if (justConnected === "1") toast.success("Returned from sign-in. Refreshing connections…");
     void (async () => {
       const next = await refreshConnections();
       if (next && "ok" in next && next.ok) {
@@ -112,8 +112,8 @@ function ConnectionsPage() {
         <div className="border-b border-border pb-6">
           <h1 className="font-display text-4xl">Connections</h1>
           <p className="mt-3 max-w-lg font-sans text-lg leading-snug">
-            Connect a people source, an inbox, an ATS, and a model. Connect opens hosted OAuth. If a tool
-            cannot sign in, you see that error — not a fake Connect.
+            Connect a people source, an inbox, an ATS, and a model. Connect opens hosted sign-in
+            (OAuth or API key). If a tool cannot sign in, you see that error.
           </p>
         </div>
         {signedOut ? (
@@ -186,11 +186,7 @@ function ConnectionsPage() {
                       <li key={item.slug} className="flex items-center justify-between gap-3 py-3">
                         <span>
                           <span className="block font-ui text-sm">{item.label}</span>
-                          <span className="font-ui text-xs text-muted-foreground">
-                            {item.lane === "sourcing" && status !== "active"
-                              ? "Required to search"
-                              : item.blurb || item.slug}
-                          </span>
+                          <span className="font-ui text-xs text-muted-foreground">{item.blurb || item.slug}</span>
                         </span>
                         {status === "active" ? (
                           <span className="font-mono text-[10px] text-stamp">signed in</span>

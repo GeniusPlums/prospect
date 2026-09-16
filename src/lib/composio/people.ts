@@ -25,7 +25,9 @@ export async function composioPeopleSource(orgId: string): Promise<PeopleSource 
           limit: 20,
         },
       });
-      if (result.successful === false) return [];
+      if (result.successful === false) {
+        throw new Error(result.error || "People search failed");
+      }
       const people = parsePeople(result.data);
       for (const person of people) {
         extras.set(person.externalId, {

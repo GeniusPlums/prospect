@@ -64,6 +64,26 @@ describe("tool schema bind", () => {
     assert.deepEqual(picked.args, { q: "founders" });
   });
 
+  it("binds people search from the toolkit schema, not a guessed slug", () => {
+    const tools = [
+      toolFromRaw({
+        slug: "APOLLO_SEARCH_PEOPLE",
+        name: "Search People",
+        inputParameters: {
+          properties: { q: { type: "string" }, page_size: { type: "integer", default: 10 } },
+          required: ["q"],
+        },
+      }),
+    ].filter((row): row is ToolSchema => Boolean(row));
+    const picked = pickToolForIntent(tools, "people_search", { query: "founders Bengaluru", limit: 20 });
+    assert.equal(picked.ok, true);
+    if (!picked.ok) return;
+    assert.equal(picked.tool.slug, "APOLLO_SEARCH_PEOPLE");
+    assert.equal(picked.args.q, "founders Bengaluru");
+    assert.equal("payload" in picked.args, false);
+    assert.equal(picked.args.page_size, 10);
+  });
+
   it("does not claim a lane works when no tool can be bound", () => {
     const tools = [
       tool({

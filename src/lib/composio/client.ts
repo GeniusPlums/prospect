@@ -6,6 +6,7 @@ import {
   toolkitLane,
   type CatalogCategory,
   type CatalogItem,
+  type CatalogListQuery,
   type RuntimeRole,
 } from "./catalog";
 import {
@@ -16,6 +17,7 @@ import {
   type ToolIntent,
   type ToolSchema,
 } from "./bind";
+import { startConnectFlow, type ConnectHost } from "./connect";
 
 let cached: Composio | undefined;
 
@@ -37,7 +39,7 @@ export async function ensureAuthConfig(toolkit: string): Promise<string> {
   );
   if (existing?.auth_config_id) return existing.auth_config_id;
 
-  const listed = await getComposio().authConfigs.list({ toolkit, isComposioManaged: true, limit: 5 });
+  const listed = await getComposio().authConfigs.list({ toolkit, limit: 10 });
   const found = listed.items[0]?.id;
   const id =
     found ??
@@ -56,74 +58,64 @@ export async function ensureAuthConfig(toolkit: string): Promise<string> {
   return id;
 }
 
-export async function startConnect(orgId: string, toolkit: string, callbackUrl: string) {
-  if (!composioConfigured()) {
-    return { ok: false as const, error: "COMPOSIO_API_KEY is not set" };
-  }
-  const slug = toolkit.trim().toLowerCase();
-  if (!/^[a-z0-9_]{2,80}$/.test(slug)) {
-    return { ok: false as const, error: "Unknown toolkit" };
-  }
-  try {
-    const meta = await getComposio().toolkits.get(slug);
-    const managed = meta.composioManagedAuthSchemes;
-    if (Array.isArray(managed) && managed.length === 0) {
-      return { ok: false as const, error: "No hosted OAuth for this tool" };
-    }
-  } catch (err) {
-    return { ok: false as const, error: errorMessage(err) };
-  }
-
-  let authConfigId: string;
-  try {
-    authConfigId = await ensureAuthConfig(slug);
-  } catch (err) {
-    return { ok: false as const, error: errorMessage(err) };
-  }
-
-  const existing = await sqlOne<{ connected_account_id: string; status: string }>(
-    `SELECT connected_account_id, status FROM org_connection WHERE org_id=$1 AND toolkit=$2`,
-    [orgId, slug],
-  );
-  if (existing?.status === "active") {
-    return { ok: true as const, alreadyConnected: true as const, connectedAccountId: existing.connected_account_id };
-  }
-
-  try {
-    const link = await getComposio().connectedAccounts.link(orgId, authConfigId, {
-      callbackUrl,
-      allowMultiple: false,
-    });
-    const connectedAccountId = link.id;
-    const redirectUrl = link.redirectUrl;
-    if (!connectedAccountId) return { ok: false as const, error: "No connection id was returned" };
-
-    await sql(
-      `INSERT INTO org_connection (id, org_id, toolkit, connected_account_id, auth_config_id, status)
-       VALUES ($1,$2,$3,$4,$5,'pending')
-       ON CONFLICT (org_id, toolkit) DO UPDATE SET connected_account_id=$4, auth_config_id=$5, status='pending'`,
-      [nid("cnx"), orgId, slug, connectedAccountId, authConfigId],
-    );
-    if (!redirectUrl) return { ok: false as const, error: "No hosted auth URL was returned" };
-    return { ok: true as const, alreadyConnected: false as const, redirectUrl, connectedAccountId };
-  } catch (err) {
-    const listed = await getComposio().connectedAccounts.list({
-      userIds: [orgId],
-      toolkitSlugs: [slug],
-      statuses: ["ACTIVE"],
-    });
-    const active = listed.items[0];
-    if (active) {
+function liveConnectHost(): ConnectHost {
+  return {
+    async getToolkit(slug) {
+      return getComposio().toolkits.get(slug);
+    },
+    async listAuthConfigs(toolkit) {
+      const listed = await getComposio().authConfigs.list({ toolkit, limit: 10 });
+      return listed.items.map((item) => ({ id: item.id }));
+    },
+    async createManagedAuthConfig(toolkit) {
+      return ensureAuthConfig(toolkit);
+    },
+    async existingConnection(orgId, toolkit) {
+      return sqlOne<{ connected_account_id: string; status: string }>(
+        `SELECT connected_account_id, status FROM org_connection WHERE org_id=$1 AND toolkit=$2`,
+        [orgId, toolkit],
+      );
+    },
+    async link(orgId, authConfigId, callbackUrl) {
+      const link = await getComposio().connectedAccounts.link(orgId, authConfigId, {
+        callbackUrl,
+        allowMultiple: false,
+      });
+      return { id: link.id, redirectUrl: link.redirectUrl };
+    },
+    async savePending(orgId, toolkit, connectedAccountId, authConfigId) {
+      await sql(
+        `INSERT INTO org_connection (id, org_id, toolkit, connected_account_id, auth_config_id, status)
+         VALUES ($1,$2,$3,$4,$5,'pending')
+         ON CONFLICT (org_id, toolkit) DO UPDATE SET connected_account_id=$4, auth_config_id=$5, status='pending'`,
+        [nid("cnx"), orgId, toolkit, connectedAccountId, authConfigId],
+      );
+    },
+    async saveActive(orgId, toolkit, connectedAccountId, authConfigId) {
       await sql(
         `INSERT INTO org_connection (id, org_id, toolkit, connected_account_id, auth_config_id, status)
          VALUES ($1,$2,$3,$4,$5,'active')
          ON CONFLICT (org_id, toolkit) DO UPDATE SET connected_account_id=$4, auth_config_id=$5, status='active'`,
-        [nid("cnx"), orgId, slug, active.id, authConfigId],
+        [nid("cnx"), orgId, toolkit, connectedAccountId, authConfigId],
       );
-      return { ok: true as const, alreadyConnected: true as const, connectedAccountId: active.id };
-    }
-    return { ok: false as const, error: errorMessage(err) };
+    },
+    async listActiveAccount(orgId, toolkit) {
+      const listed = await getComposio().connectedAccounts.list({
+        userIds: [orgId],
+        toolkitSlugs: [toolkit],
+        statuses: ["ACTIVE"],
+      });
+      const active = listed.items[0];
+      return active ? { id: active.id } : undefined;
+    },
+  };
+}
+
+export async function startConnect(orgId: string, toolkit: string, callbackUrl: string) {
+  if (!composioConfigured()) {
+    return { ok: false as const, error: "COMPOSIO_API_KEY is not set" };
   }
+  return startConnectFlow(orgId, toolkit, callbackUrl, liveConnectHost());
 }
 
 export async function syncOrgConnections(orgId: string) {
@@ -321,10 +313,10 @@ export async function listCatalogCategories(): Promise<CatalogCategory[]> {
   }).filter((item) => item.id);
 }
 
-async function listToolkitPage(query: { category?: string; cursor?: string }): Promise<unknown> {
+async function listToolkitPage(query: CatalogListQuery): Promise<unknown> {
   return getComposio().toolkits.get({
     limit: 100,
-    sortBy: "alphabetically",
+    sortBy: query.sortBy ?? (query.category ? "alphabetically" : "usage"),
     ...(query.category ? { category: query.category } : {}),
     ...(query.cursor ? { cursor: query.cursor } : {}),
   });
@@ -336,6 +328,7 @@ export async function listHiringCatalog(): Promise<{ items: CatalogItem[]; nextC
     const items = await collectHiringCatalog({
       listCategories: listCatalogCategories,
       listPage: listToolkitPage,
+      getToolkit: (slug) => getComposio().toolkits.get(slug),
     });
     return { items, nextCursor: null };
   } catch (err) {

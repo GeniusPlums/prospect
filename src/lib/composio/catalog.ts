@@ -20,6 +20,8 @@ export type ToolkitRef = {
   categories?: { name?: string; slug?: string; id?: string }[];
   noAuth?: boolean;
   managedAuth?: string[];
+  authSchemes?: string[];
+  authModes?: string[];
 };
 
 export const LANE_ORDER: RuntimeRole[] = ["llm", "sourcing", "ats", "outreach"];
@@ -31,14 +33,57 @@ export const LANE_LABEL: Record<RuntimeRole, string> = {
   outreach: "Outreach / mail",
 };
 
-/** Map Composio category names/slugs to a runtime job. Not a toolkit allowlist. */
+/**
+ * Known hiring apps to retrieve by slug when category paging misses them.
+ * Not a runtime allowlist — if retrieve 404s, the name simply is not in this catalog.
+ */
+export const HIRING_PROBE_SLUGS = [
+  "openai",
+  "anthropic",
+  "groq",
+  "gemini",
+  "google_gemini",
+  "claude",
+  "apollo",
+  "linkedin",
+  "hunter",
+  "pdl",
+  "peopledatalabs",
+  "people_data_labs",
+  "coresignal",
+  "rocketreach",
+  "debounce",
+  "zoominfo",
+  "lusha",
+  "clearbit",
+  "gmail",
+  "outlook",
+  "microsoft_outlook",
+  "slack",
+  "googlecalendar",
+  "google_calendar",
+  "greenhouse",
+  "lever",
+  "ashby",
+  "workday",
+] as const;
+
+/** Map category names/slugs to a runtime job. Prefer showing hiring-adjacent tools. */
 export function roleFromCategoryText(text: string): RuntimeRole | null {
   const t = text.toLowerCase().replace(/[_-]/g, " ");
   if (isNoiseCategoryText(t)) return null;
-  if (/ai models?|\bllm\b|language models?|generative ai|\bopenai\b|machine learning models?/.test(t)) return "llm";
-  if (/talent intelligence|people data|people search|contact data|\bsourcing\b|recruiting data/.test(t)) return "sourcing";
-  if (/\bats\b|applicant|hris|human resources?|\bhr\b|recruiting/.test(t)) return "ats";
-  if (/\bemail\b|\bmail\b|inbox|messaging|communication|outreach/.test(t)) return "outreach";
+  if (/\bai\b|\bllm\b|language model|generative|openai|anthropic|machine learning|chat models?/.test(t)) return "llm";
+  if (
+    /talent intelligence|people data|people search|contact data|\bsourcing\b|recruiting data|enrichment|\bcrm\b|sales intelligence|lead generation|prospecting/.test(
+      t,
+    )
+  ) {
+    return "sourcing";
+  }
+  if (/\bats\b|applicant|hris|human resources?|\bhr\b|recruiting|talent acquisition/.test(t)) return "ats";
+  if (/\bemail\b|\bmail\b|inbox|messaging|communication|outreach|calendar|scheduling|\bsocial\b/.test(t)) {
+    return "outreach";
+  }
   return null;
 }
 
@@ -63,11 +108,11 @@ export function haystack(ref: ToolkitRef): string {
 }
 
 const EXCLUDE =
-  /\b(devops|kubernetes|\bk8s\b|docker|terraform|ansible|jenkins|circleci|github|gitlab|bitbucket|\baws\b|amazon web|google cloud|\bgcp\b|azure devops|postgres|postgresql|mysql|mongodb|\bredis\b|snowflake|bigquery|dynamodb|cassandra|elasticsearch|\bkafka\b|prometheus|grafana|datadog|sentry|pagerduty|\bjira\b|linear app|\basana\b|trello|confluence|\bfigma\b|stripe|shopify|\bvercel\b|netlify|heroku|cloudflare|\bnginx\b|bitbucket)\b/;
+  /\b(devops|kubernetes|\bk8s\b|docker|terraform|ansible|jenkins|circleci|github|gitlab|bitbucket|\baws\b|amazon web|google cloud|\bgcp\b|azure devops|postgres|postgresql|mysql|mongodb|\bredis\b|snowflake|bigquery|dynamodb|cassandra|elasticsearch|\bkafka\b|prometheus|grafana|datadog|sentry|pagerduty|\bjira\b|linear app|\basana\b|trello|confluence|\bfigma\b|stripe|shopify|\bvercel\b|netlify|heroku|cloudflare|\bnginx\b)\b/;
 
 function laneFromKeywords(text: string): RuntimeRole | null {
   if (
-    /\b(openai|anthropic|claude|groq|gemini|mistral|together ai|fireworks|perplexity|hugging ?face|cohere|vertex ai|bedrock|deepseek|ollama|openrouter|cerebras|\bgrok\b|\bxai\b|google ai|ai studio|language model|\bllm\b|generative ai|ai models?)\b/.test(
+    /\b(openai|anthropic|claude|groq|gemini|mistral|together ai|fireworks|perplexity|hugging ?face|cohere|vertex ai|bedrock|deepseek|ollama|openrouter|cerebras|\bgrok\b|\bxai\b|google ai|google gemini|ai studio|language model|\bllm\b|generative ai|ai models?|chatgpt)\b/.test(
       text,
     )
   ) {
@@ -81,14 +126,14 @@ function laneFromKeywords(text: string): RuntimeRole | null {
     return "ats";
   }
   if (
-    /\b(apollo|linkedin|people data labs|\bpdl\b|coresignal|zoominfo|lusha|contactout|rocketreach|clearbit|fullenrich|dropcontact|proxycurl|snov|cognism|hireez|seekout|people search|talent intel|contact data|people data)\b/.test(
+    /\b(apollo|linkedin|people data labs|peopledatalabs|\bpdl\b|coresignal|zoominfo|lusha|contactout|rocketreach|clearbit|fullenrich|dropcontact|proxycurl|snov|cognism|hireez|seekout|debounce|people search|talent intel|contact data|people data)\b/.test(
       text,
     )
   ) {
     return "sourcing";
   }
   if (
-    /\b(gmail|outlook|office 365|microsoft 365|microsoft outlook|\bslack\b|microsoft teams|sendgrid|mailgun|postmark|twilio|whatsapp|resend|\binbox\b|\bhunter\b|email finder)\b/.test(
+    /\b(gmail|outlook|office 365|microsoft 365|microsoft outlook|\bslack\b|microsoft teams|sendgrid|mailgun|postmark|twilio|whatsapp|resend|\binbox\b|\bhunter\b|email finder|google calendar|googlecalendar)\b/.test(
       text,
     )
   ) {
@@ -110,15 +155,27 @@ export function toolkitLane(ref: ToolkitRef): RuntimeRole | null {
   return null;
 }
 
-export function connectability(ref: { noAuth?: boolean; managedAuth?: string[] }): {
-  connectable: boolean;
-  connectError?: string;
-} {
+const CONNECTABLE_SCHEME =
+  /oauth|api[_]?key|bearer|basic|no[_]?auth|composio[_]?managed|managed[_]?auth|dcr|s2s|calcom|saml|service[_]?account/i;
+
+export function isConnectableScheme(value: string): boolean {
+  return CONNECTABLE_SCHEME.test(value.replace(/[\s-]+/g, "_"));
+}
+
+/**
+ * SDK list items expose `authSchemes` + `composioManagedAuthSchemes`.
+ * Retrieve exposes `composioManagedAuthSchemes` + `authConfigDetails[].mode`.
+ * Empty hosted-OAuth array is not a dead end — API_KEY / BEARER still connect.
+ */
+export function connectability(ref: {
+  noAuth?: boolean;
+  managedAuth?: string[];
+  authSchemes?: string[];
+  authModes?: string[];
+}): { connectable: boolean; connectError?: string } {
   if (ref.noAuth) return { connectable: true };
-  if (ref.managedAuth && ref.managedAuth.length > 0) return { connectable: true };
-  if (ref.managedAuth && ref.managedAuth.length === 0) {
-    return { connectable: false, connectError: "No hosted OAuth for this tool" };
-  }
+  const schemes = [...(ref.managedAuth ?? []), ...(ref.authSchemes ?? []), ...(ref.authModes ?? [])];
+  if (schemes.some(isConnectableScheme)) return { connectable: true };
   return { connectable: true };
 }
 
@@ -179,7 +236,17 @@ export function hiringScanCategoryIds(categories: CatalogCategory[]): string[] {
   return ids;
 }
 
-export const FALLBACK_HIRING_CATEGORY_IDS = ["ai-models", "human-resources", "email", "communication"];
+export const FALLBACK_HIRING_CATEGORY_IDS = [
+  "ai-models",
+  "human-resources",
+  "email",
+  "communication",
+  "crm",
+  "productivity",
+  "calendar",
+  "social",
+  "sales",
+];
 
 export function refsFromToolkitList(listed: unknown): ToolkitRef[] {
   return extractToolkitRows(listed)
@@ -196,15 +263,33 @@ export function mergeHiringItems(refs: ToolkitRef[]): CatalogItem[] {
   return [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
+export function summarizeCatalog(items: CatalogItem[]) {
+  const lanes: Record<RuntimeRole, number> = { llm: 0, sourcing: 0, ats: 0, outreach: 0 };
+  for (const item of items) lanes[item.lane] += 1;
+  return {
+    total: items.length,
+    lanes,
+    connectable: items.filter((item) => item.connectable).length,
+    slugs: items.map((item) => item.slug).sort(),
+  };
+}
+
+export type CatalogListQuery = {
+  category?: string;
+  cursor?: string;
+  sortBy?: "usage" | "alphabetically";
+};
+
 export async function collectCategoryPages(
-  listPage: (query: { category?: string; cursor?: string }) => Promise<unknown>,
+  listPage: (query: CatalogListQuery) => Promise<unknown>,
   category?: string,
+  sortBy?: "usage" | "alphabetically",
 ): Promise<ToolkitRef[]> {
   const out: ToolkitRef[] = [];
   let cursor: string | undefined;
   let pages = 0;
   do {
-    const listed = await listPage({ category, cursor });
+    const listed = await listPage({ category, cursor, sortBy });
     out.push(...refsFromToolkitList(listed));
     cursor = catalogListCursor(listed) ?? undefined;
     pages += 1;
@@ -212,9 +297,27 @@ export async function collectCategoryPages(
   return out;
 }
 
+function uniqueTargets(ids: Array<string | undefined>): Array<string | undefined> {
+  const out: Array<string | undefined> = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    const key = id ?? "";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(id);
+  }
+  return out;
+}
+
+function refFromRetrieve(raw: unknown): ToolkitRef | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  return mapToolkitRow(raw as Record<string, unknown>);
+}
+
 export async function collectHiringCatalog(deps: {
   listCategories: () => Promise<CatalogCategory[]>;
-  listPage: (query: { category?: string; cursor?: string }) => Promise<unknown>;
+  listPage: (query: CatalogListQuery) => Promise<unknown>;
+  getToolkit?: (slug: string) => Promise<unknown>;
 }): Promise<CatalogItem[]> {
   let categories: CatalogCategory[] = [];
   try {
@@ -223,19 +326,56 @@ export async function collectHiringCatalog(deps: {
     categories = [];
   }
   const scanIds = hiringScanCategoryIds(categories);
-  const targets: Array<string | undefined> = scanIds.length > 0 ? scanIds : [...FALLBACK_HIRING_CATEGORY_IDS, undefined];
-  const settled = await Promise.allSettled(targets.map((category) => collectCategoryPages(deps.listPage, category)));
+  const targets = uniqueTargets([undefined, ...scanIds, ...FALLBACK_HIRING_CATEGORY_IDS]);
+  const settled = await Promise.allSettled(
+    targets.map((category) => collectCategoryPages(deps.listPage, category, category ? "alphabetically" : "usage")),
+  );
   const refs: ToolkitRef[] = [];
   const errors: Error[] = [];
   for (const result of settled) {
     if (result.status === "fulfilled") refs.push(...result.value);
     else errors.push(result.reason instanceof Error ? result.reason : new Error(String(result.reason)));
   }
+
+  if (deps.getToolkit) {
+    const have = new Set(refs.map((row) => row.slug));
+    const missing = HIRING_PROBE_SLUGS.filter((slug) => !have.has(slug));
+    const probed = await Promise.allSettled(
+      missing.map(async (slug) => {
+        const raw = await deps.getToolkit!(slug);
+        return refFromRetrieve(raw);
+      }),
+    );
+    for (const result of probed) {
+      if (result.status === "fulfilled" && result.value) refs.push(result.value);
+    }
+  }
+
   const items = mergeHiringItems(refs);
   if (items.length === 0) {
     throw errors[0] ?? new Error("No hiring tools were returned");
   }
   return items;
+}
+
+function stringList(...candidates: unknown[]): string[] | undefined {
+  for (const candidate of candidates) {
+    if (!Array.isArray(candidate)) continue;
+    return candidate.filter((value): value is string => typeof value === "string");
+  }
+  return undefined;
+}
+
+function modeList(details: unknown): string[] | undefined {
+  if (!Array.isArray(details)) return undefined;
+  const modes = details
+    .map((row) => {
+      if (!row || typeof row !== "object") return "";
+      const mode = (row as { mode?: unknown }).mode;
+      return typeof mode === "string" ? mode : "";
+    })
+    .filter(Boolean);
+  return modes;
 }
 
 export function mapToolkitRow(row: Record<string, unknown>): ToolkitRef | null {
@@ -251,17 +391,16 @@ export function mapToolkitRow(row: Record<string, unknown>): ToolkitRef | null {
     (typeof row.description === "string" && row.description) ||
     categories.map((c) => c.name).filter(Boolean).join(" · ") ||
     "";
-  const managedAuth = Array.isArray(row.composioManagedAuthSchemes)
-    ? row.composioManagedAuthSchemes.filter((value): value is string => typeof value === "string")
-    : undefined;
   return {
     slug,
     label: name,
     blurb,
     category: categories[0]?.name ?? "",
     categories,
-    noAuth: row.noAuth === true,
-    managedAuth,
+    noAuth: row.noAuth === true || row.no_auth === true,
+    managedAuth: stringList(row.composioManagedAuthSchemes, row.composio_managed_auth_schemes),
+    authSchemes: stringList(row.authSchemes, row.auth_schemes),
+    authModes: modeList(row.authConfigDetails ?? row.auth_config_details),
   };
 }
 
