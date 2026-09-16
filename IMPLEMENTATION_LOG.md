@@ -1,5 +1,14 @@
 # Implementation log
 
+## 2026-09-16 — Live hiring Connections (no Popular lie)
+
+**What changed.** Connections fetches the real Composio toolkit catalog (`toolkits.list` / `toolkits.get` query, not category chips as a fake list). “Popular” is not a Prospect filter — Composio’s Popular/DevOps/cloud/database categories are dropped. The page groups live results into LLM, sourcing/people, ATS/HRIS, and outreach, with search. Connect calls `startConnect` and redirects to hosted OAuth or shows the real error. Catalog failure renders “Could not load Composio catalog” plus the error, never a dummy list. Runtime picks the first connected toolkit in a lane (category + keywords, not a slug allowlist). Home search stays locked until a sourcing toolkit is connected.
+
+**Why.** The previous UI treated Composio category pills (including Popular) as the product. Clicking them only toggled chips when the toolkit list parse failed or returned empty.
+
+**Tested.** `npm test` (catalog include ATS/LLM, exclude github/docker/kubernetes even when Popular is first; extractToolkitRows ignores a single-toolkit retrieve). `npx tsc --noEmit`.
+
+
 ## 2026-08-29 — Demo to product (build spec)
 
 **What changed.** Replaced the theatre pipeline and Zustand-as-source-of-truth with a Postgres-backed chain: schema + eval harness first, surface-agnostic ICP versions, `profile_source` adapters (local / Coresignal / PDL swap file), cache-before-collect ingest, rubric scoring + Bradley-Terry, non-blocking reviewer, paper/navy UI, feedback re-rank from stage 1, reveal waterfall, Merge ATS + same-ICP screening, billing meter + cron, empty-but-complete precision dashboards.

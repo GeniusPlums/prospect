@@ -1,7 +1,17 @@
 import { Composio } from "@composio/core";
 import { sql, sqlOne } from "@/lib/db";
 import { nid } from "@/lib/ids";
-import { roleFromCategories, ROLE_NEEDLES, type CatalogCategory, type CatalogItem, type RuntimeRole } from "./catalog";
+import {
+  catalogCursor,
+  extractToolkitRows,
+  mapToolkitRow,
+  toHiringCatalogItem,
+  toolkitLane,
+  ROLE_NEEDLES,
+  type CatalogCategory,
+  type CatalogItem,
+  type RuntimeRole,
+} from "./catalog";
 
 let cached: Composio | undefined;
 
@@ -159,13 +169,21 @@ export async function toolkitCategories(slug: string): Promise<{ slug: string; n
 export async function connectionsForRole(orgId: string, role: RuntimeRole) {
   const active = await listActiveConnections(orgId);
   const matched: typeof active = [];
-  const rest: typeof active = [];
   for (const row of active) {
-    const categories = await toolkitCategories(row.toolkit);
-    if (roleFromCategories(categories) === role) matched.push(row);
-    else rest.push(row);
+    const hit = metaCache.get(row.toolkit);
+    const categories = hit?.categories ?? (await toolkitCategories(row.toolkit));
+    const lane = toolkitLane({
+      slug: row.toolkit,
+      label: hit?.name ?? row.toolkit,
+      categories,
+    });
+    if (lane === role) matched.push(row);
   }
-  return [...matched, ...rest];
+  return matched;
+}
+
+export async function hasLaneConnection(orgId: string, role: RuntimeRole) {
+  return (await connectionsForRole(orgId, role)).length > 0;
 }
 
 export async function firstActiveForRole(orgId: string, role: RuntimeRole, needles = ROLE_NEEDLES[role]) {
@@ -243,54 +261,68 @@ export async function executeIntent(input: {
 }
 
 export async function listCatalogCategories(): Promise<CatalogCategory[]> {
-  if (!composioConfigured()) return [];
+  if (!composioConfigured()) throw new Error("COMPOSIO_API_KEY is not set");
   const listed = await getComposio().toolkits.listCategories();
-  return listed.items.map((item) => ({ id: item.id, name: item.name }));
+  return (listed.items ?? []).map((item) => {
+    const rec = item as { id?: string; slug?: string; name: string };
+    return { id: rec.id ?? rec.slug ?? "", name: rec.name };
+  }).filter((item) => item.id);
 }
 
-function catalogCursor(page: unknown): string | null {
-  if (!page || typeof page !== "object") return null;
-  const rec = page as Record<string, unknown>;
-  const value = rec.nextCursor ?? rec.next_cursor;
-  return typeof value === "string" && value.length > 0 ? value : null;
-}
-
-type ToolkitRow = {
-  slug?: string;
-  name?: string;
-  meta?: { description?: string; categories?: { name: string; slug: string }[] };
+type ToolkitLister = {
+  get: (query: unknown) => Promise<unknown>;
+  list?: (query: unknown) => Promise<unknown>;
 };
 
-function mapToolkitRow(item: ToolkitRow, fallbackCategory: string): CatalogItem | null {
-  if (!item.slug) return null;
-  return {
-    slug: item.slug,
-    label: item.name || item.slug,
-    blurb: item.meta?.description ?? item.meta?.categories?.map((c) => c.name).join(" · ") ?? "",
-    category: item.meta?.categories?.[0]?.name ?? fallbackCategory,
-  };
+async function fetchToolkitList(query: Record<string, unknown>): Promise<unknown> {
+  const toolkits = getComposio().toolkits as unknown as ToolkitLister;
+  if (typeof toolkits.list === "function") return toolkits.list(query);
+  return toolkits.get(query);
 }
 
-export async function listCatalogPage(input: { category?: string; cursor?: string }): Promise<{
-  items: CatalogItem[];
+async function listRawCatalogPage(input: { category?: string; cursor?: string }): Promise<{
+  rows: ReturnType<typeof mapToolkitRow>[];
   nextCursor: string | null;
 }> {
-  if (!composioConfigured()) return { items: [], nextCursor: null };
-  const query = {
-    category: input.category,
-    cursor: input.cursor,
-    limit: 40,
-    sortBy: "alphabetically" as const,
-  };
-  const listToolkits = getComposio().toolkits.get as (q: typeof query) => Promise<unknown>;
-  const listed = await listToolkits(query);
-  const rows: ToolkitRow[] = Array.isArray(listed)
-    ? listed
-    : listed && typeof listed === "object" && Array.isArray((listed as { items?: unknown }).items)
-      ? ((listed as { items: ToolkitRow[] }).items)
-      : [];
-  const items = rows.map((row) => mapToolkitRow(row, input.category ?? "")).filter((row): row is CatalogItem => Boolean(row));
+  const query: Record<string, unknown> = { limit: 100, sortBy: "alphabetically" };
+  if (input.category) query.category = input.category;
+  if (input.cursor) query.cursor = input.cursor;
+  const listed = await fetchToolkitList(query);
+  const rows = extractToolkitRows(listed).map(mapToolkitRow);
   const nextFromPage = catalogCursor(listed);
-  const nextFromFullPage = !nextFromPage && Array.isArray(listed) && rows.length >= 40 ? rows[rows.length - 1]?.slug ?? null : null;
-  return { items, nextCursor: nextFromPage ?? nextFromFullPage };
+  const filled = rows.filter(Boolean);
+  const nextFromFullPage =
+    !nextFromPage && filled.length >= 100 ? filled[filled.length - 1]?.slug ?? null : null;
+  return { rows, nextCursor: nextFromPage ?? nextFromFullPage };
+}
+
+async function collectPages(category?: string): Promise<ReturnType<typeof mapToolkitRow>[]> {
+  const out: ReturnType<typeof mapToolkitRow>[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  do {
+    const page = await listRawCatalogPage({ category, cursor });
+    out.push(...page.rows);
+    cursor = page.nextCursor ?? undefined;
+    pages += 1;
+  } while (cursor && pages < 16);
+  return out;
+}
+
+export async function listHiringCatalog(): Promise<{ items: CatalogItem[]; nextCursor: null }> {
+  if (!composioConfigured()) throw new Error("COMPOSIO_API_KEY is not set");
+  const seen = new Map<string, CatalogItem>();
+  const refs = await collectPages();
+  for (const ref of refs) {
+    if (!ref) continue;
+    const item = toHiringCatalogItem(ref);
+    if (item) seen.set(item.slug, item);
+  }
+
+  if (seen.size === 0) {
+    throw new Error("Composio returned no hiring toolkits");
+  }
+
+  const items = [...seen.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return { items, nextCursor: null };
 }

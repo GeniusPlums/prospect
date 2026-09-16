@@ -13,7 +13,14 @@ import { runEvalSuite } from "@/lib/eval/run-eval";
 import { nid } from "@/lib/ids";
 import { requireOrg } from "@/lib/auth/session";
 import { loadPeople } from "@/lib/index/corpus";
-import { composioConfigured, listCatalogCategories, listCatalogPage, startConnect, syncOrgConnections } from "@/lib/composio/client";
+import {
+  composioConfigured,
+  hasLaneConnection,
+  listHiringCatalog,
+  startConnect,
+  syncOrgConnections,
+} from "@/lib/composio/client";
+import { LANE_LABEL, LANE_ORDER } from "@/lib/composio/catalog";
 import type { Icp, FeedbackVote } from "@/lib/types";
 
 async function boot() {
@@ -38,6 +45,13 @@ export const startFromBrief = createServerFn({ method: "POST" })
       const parsed = await parseBrief({ data: { text: data.text } });
       if (!parsed.ok) return { ok: false as const, error: parsed.error };
       icp = parsed.icp;
+    }
+    const sourcing = await hasLaneConnection(session.orgId, "sourcing");
+    if (!sourcing) {
+      return {
+        ok: false as const,
+        error: "Connect a sourcing toolkit on Connections before searching.",
+      };
     }
     const stored = await writeIcpVersion({
       orgId: session.orgId,
@@ -312,28 +326,54 @@ export const persistEval = createServerFn({ method: "POST" }).handler(async () =
 
 export const listConnections = createServerFn({ method: "GET" }).handler(async () => {
   const session = await org().catch(() => null);
+  const lanes = LANE_ORDER.map((id) => ({ id, name: LANE_LABEL[id] }));
   if (!session) {
     return {
       ok: false as const,
       error: "Sign in required",
       configured: composioConfigured(),
-      categories: [],
+      sourcingConnected: false,
+      lanes,
       connections: [] as { toolkit: string; status: string; connected_account_id: string }[],
     };
   }
-  const [connections, categories] = await Promise.all([
-    syncOrgConnections(session.orgId),
-    listCatalogCategories(),
-  ]);
-  return { ok: true as const, configured: composioConfigured(), categories, connections };
+  const connections = await syncOrgConnections(session.orgId);
+  const sourcingConnected = await hasLaneConnection(session.orgId, "sourcing");
+  return {
+    ok: true as const,
+    configured: composioConfigured(),
+    sourcingConnected,
+    lanes,
+    connections,
+  };
 });
 
-export const listToolkitCatalog = createServerFn({ method: "GET" })
-  .validator((input: { category?: string; cursor?: string }) => input)
-  .handler(async ({ data }) => {
-    await org();
-    return listCatalogPage({ category: data.category, cursor: data.cursor });
-  });
+export const listToolkitCatalog = createServerFn({ method: "GET" }).handler(async () => {
+  await org();
+  if (!composioConfigured()) {
+    return {
+      ok: false as const,
+      error: "COMPOSIO_API_KEY is not set",
+      items: [] as Awaited<ReturnType<typeof listHiringCatalog>>["items"],
+    };
+  }
+  try {
+    const listed = await listHiringCatalog();
+    return { ok: true as const, items: listed.items };
+  } catch (err) {
+    return {
+      ok: false as const,
+      error: err instanceof Error ? err.message : "Could not load Composio catalog",
+      items: [] as Awaited<ReturnType<typeof listHiringCatalog>>["items"],
+    };
+  }
+});
+
+export const searchReadiness = createServerFn({ method: "GET" }).handler(async () => {
+  const session = await org().catch(() => null);
+  if (!session) return { ok: false as const, sourcingConnected: false };
+  return { ok: true as const, sourcingConnected: await hasLaneConnection(session.orgId, "sourcing") };
+});
 
 export const connectToolkit = createServerFn({ method: "POST" })
   .validator((input: { toolkit: string; origin: string }) => input)

@@ -2,26 +2,21 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { connectToolkit, listConnections, listToolkitCatalog } from "@/lib/server/fns";
-import { roleFromCategoryText, type CatalogItem } from "@/lib/composio/catalog";
+import { LANE_LABEL, LANE_ORDER, type CatalogItem, type RuntimeRole } from "@/lib/composio/catalog";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/connections")({ component: ConnectionsPage });
 
-const ROLE_LABEL: Record<string, string> = {
-  llm: "LLM / brain",
-  sourcing: "Sourcing / people",
-  ats: "ATS / HR",
-  outreach: "Outreach / mail",
-};
-
 function ConnectionsPage() {
   const [data, setData] = useState<Awaited<ReturnType<typeof listConnections>> | null>(null);
   const [items, setItems] = useState<CatalogItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [category, setCategory] = useState<string>("");
+  const [lane, setLane] = useState<RuntimeRole | "">("");
+  const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
 
   async function refreshConnections() {
     const next = await listConnections();
@@ -29,16 +24,19 @@ function ConnectionsPage() {
     return next;
   }
 
-  async function loadPage(nextCategory: string, cursor?: string, append = false) {
+  async function loadCatalog() {
     setLoadingCatalog(true);
+    setCatalogError(null);
+    setItems([]);
     try {
-      const page = await listToolkitCatalog({
-        data: { category: nextCategory || undefined, cursor },
-      });
-      setItems((prev) => (append ? [...prev, ...page.items] : page.items));
-      setNextCursor(page.nextCursor);
+      const page = await listToolkitCatalog();
+      if (!page.ok) {
+        setCatalogError(page.error || "Could not load Composio catalog");
+        return;
+      }
+      setItems(page.items);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load Composio catalog");
+      setCatalogError(err instanceof Error ? err.message : "Could not load Composio catalog");
     } finally {
       setLoadingCatalog(false);
     }
@@ -48,7 +46,7 @@ function ConnectionsPage() {
     void (async () => {
       const next = await refreshConnections();
       if (next && "ok" in next && next.ok) {
-        await loadPage("");
+        await loadCatalog();
       }
     })();
   }, []);
@@ -68,7 +66,9 @@ function ConnectionsPage() {
       }
       if ("redirectUrl" in result && result.redirectUrl) {
         window.location.href = result.redirectUrl;
+        return;
       }
+      toast.error("Composio did not return a hosted auth URL");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not start connect");
     } finally {
@@ -76,23 +76,23 @@ function ConnectionsPage() {
     }
   }
 
-  async function onCategory(id: string) {
-    setCategory(id);
-    await loadPage(id);
-  }
-
   const connected = new Map((data && "connections" in data ? data.connections : []).map((row) => [row.toolkit, row.status]));
-  const categories = data && "categories" in data ? data.categories : [];
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return items.filter((item) => {
+      if (lane && item.lane !== lane) return false;
+      if (!needle) return true;
+      return `${item.label} ${item.slug} ${item.blurb}`.toLowerCase().includes(needle);
+    });
+  }, [items, lane, query]);
+
   const grouped = useMemo(() => {
-    const map = new Map<string, CatalogItem[]>();
-    for (const item of items) {
-      const key = item.category || "Other";
-      const list = map.get(key) ?? [];
-      list.push(item);
-      map.set(key, list);
-    }
-    return [...map.entries()];
-  }, [items]);
+    return LANE_ORDER.map((id) => ({
+      id,
+      name: LANE_LABEL[id],
+      list: filtered.filter((item) => item.lane === id),
+    })).filter((group) => group.list.length > 0);
+  }, [filtered]);
 
   return (
     <AppShell>
@@ -100,9 +100,8 @@ function ConnectionsPage() {
         <div>
           <h1 className="font-display text-3xl">Connections</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Connect any toolkit Composio lists. Runtime uses the first active toolkit for each job: LLM for grading,
-            sourcing for people search, ATS for write-back, inbox for send. Cache-before-collect. Reveal never invents
-            an email.
+            Live Composio catalog for hiring only: LLMs, sourcing/people data, ATS/HRIS, and outreach. Connect starts
+            hosted OAuth. Runtime uses the first connected toolkit in that lane that can do the job.
           </p>
         </div>
         {data && "ok" in data && data.ok === false ? (
@@ -134,34 +133,44 @@ function ConnectionsPage() {
         {data && "ok" in data && data.ok ? (
           <>
             <div className="flex flex-wrap gap-2">
-              <Button size="sm" variant={category === "" ? "default" : "outline"} onClick={() => void onCategory("")}>
-                All
+              <Button size="sm" variant={lane === "" ? "default" : "outline"} onClick={() => setLane("")}>
+                All hiring
               </Button>
-              {categories.map((item) => (
+              {LANE_ORDER.map((id) => (
                 <Button
-                  key={item.id}
+                  key={id}
                   size="sm"
-                  variant={category === item.id ? "default" : "outline"}
-                  onClick={() => void onCategory(item.id)}
+                  variant={lane === id ? "default" : "outline"}
+                  onClick={() => setLane(id)}
                 >
-                  {item.name}
+                  {LANE_LABEL[id]}
                 </Button>
               ))}
             </div>
-            {grouped.map(([name, list]) => (
-              <section key={name} className="space-y-3">
-                <h2 className="text-sm font-medium uppercase tracking-[0.14em] text-muted-foreground">{name}</h2>
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Filter toolkits"
+              aria-label="Filter toolkits"
+            />
+            {catalogError ? (
+              <p className="text-sm text-destructive">
+                Could not load Composio catalog
+                {catalogError ? `: ${catalogError}` : "."}
+              </p>
+            ) : null}
+            {grouped.map((group) => (
+              <section key={group.id} className="space-y-3">
+                <h2 className="text-sm font-medium uppercase tracking-[0.14em] text-muted-foreground">{group.name}</h2>
                 <ul className="divide-y divide-border rounded-xl border border-border bg-card">
-                  {list.map((item) => {
+                  {group.list.map((item) => {
                     const status = connected.get(item.slug);
-                    const role = roleFromCategoryText(`${item.category} ${item.slug} ${item.label}`);
                     return (
                       <li key={item.slug} className="flex items-center justify-between gap-3 px-4 py-3">
                         <span>
                           <span className="block text-sm font-medium">{item.label}</span>
                           <span className="text-xs text-muted-foreground">
                             {item.slug}
-                            {role ? ` · ${ROLE_LABEL[role]}` : ""}
                             {item.blurb ? ` · ${item.blurb}` : ""}
                           </span>
                         </span>
@@ -183,11 +192,9 @@ function ConnectionsPage() {
                 </ul>
               </section>
             ))}
-            {loadingCatalog ? <p className="text-sm text-muted-foreground">Loading catalog…</p> : null}
-            {nextCursor ? (
-              <Button variant="outline" disabled={loadingCatalog} onClick={() => void loadPage(category, nextCursor, true)}>
-                Load more
-              </Button>
+            {loadingCatalog ? <p className="text-sm text-muted-foreground">Loading Composio catalog…</p> : null}
+            {!loadingCatalog && !catalogError && items.length > 0 && grouped.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No hiring toolkits match that filter.</p>
             ) : null}
           </>
         ) : null}

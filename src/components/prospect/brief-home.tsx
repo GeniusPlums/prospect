@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { parseBrief } from "@/lib/ai/parse-brief";
 import { sampleBriefs } from "@/lib/data/sample-briefs";
-import { startFromBrief } from "@/lib/server/fns";
+import { searchReadiness, startFromBrief } from "@/lib/server/fns";
 import type { Icp } from "@/lib/types";
 
 export function BriefHome() {
@@ -22,9 +22,11 @@ export function BriefHome() {
   const [parsing, setParsing] = useState(false);
   const [running, setRunning] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  const [ready, setReady] = useState<{ ok: boolean; sourcingConnected: boolean } | null>(null);
 
   useEffect(() => {
     setHydrated(true);
+    void searchReadiness().then(setReady);
   }, []);
 
   useEffect(() => {
@@ -105,10 +107,41 @@ export function BriefHome() {
           </main>
           <div className="sticky bottom-0 z-40 border-t border-border bg-background/95">
             <div className="mx-auto flex max-w-6xl justify-end px-4 py-3 pr-32 pb-16 sm:px-6 sm:pb-3">
-              <Button onClick={() => void onRun()} disabled={!hydrated || running} size="lg">
-                {!hydrated ? "Loading…" : running ? "Starting search…" : "Find 22 people"}
-                <ArrowRight />
-              </Button>
+              <div className="flex flex-col items-end gap-2">
+                {ready && !ready.ok ? (
+                  <p className="text-sm text-muted-foreground">
+                    <Link to="/sign-in" className="underline">
+                      Sign in
+                    </Link>{" "}
+                    to search with your connected sourcing toolkit.
+                  </p>
+                ) : null}
+                {ready?.ok && !ready.sourcingConnected ? (
+                  <p className="text-sm text-muted-foreground">
+                    Connect a sourcing toolkit on{" "}
+                    <Link to="/connections" className="underline">
+                      Connections
+                    </Link>{" "}
+                    before searching.
+                  </p>
+                ) : null}
+                <Button
+                  onClick={() => void onRun()}
+                  disabled={!hydrated || running || !ready?.ok || !ready.sourcingConnected}
+                  size="lg"
+                >
+                  {!hydrated || !ready
+                    ? "Loading…"
+                    : running
+                      ? "Starting search…"
+                      : !ready.ok
+                        ? "Sign in to search"
+                        : ready.sourcingConnected
+                          ? "Find 22 people"
+                          : "Connect sourcing first"}
+                  <ArrowRight />
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -126,7 +159,7 @@ export function BriefHome() {
             <Link to="/connections" className="underline">
               Connections
             </Link>{" "}
-            — any toolkit Composio lists.
+            — hiring lanes only (LLM, sourcing, ATS, outreach).
           </p>
           <div className="mt-6">
             <FlowSteps current={1} />

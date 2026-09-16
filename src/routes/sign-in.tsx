@@ -42,7 +42,7 @@ function SignInPage() {
       <main className="mx-auto max-w-md space-y-6 px-4 py-16">
         <h1 className="font-display text-3xl">{mode === "up" ? "Create workspace" : "Sign in"}</h1>
         <p className="text-sm text-muted-foreground">
-          Email and password on this app. Connect any Composio toolkit on Connections — LLM, sourcing, ATS, inbox, or anything else they list.
+          Email and password on this app. Connect hiring tools on Connections — LLM, sourcing, ATS, or outreach.
         </p>
         <form className="space-y-3" onSubmit={(event) => void onSubmit(event)}>
           {mode === "up" ? (
