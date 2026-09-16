@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { completeJson, extractJson } from "@/lib/ai/complete";
+import { requireOrg } from "@/lib/auth/session";
 import type { CompanyKind, Icp, Seniority } from "@/lib/types";
 
 const IcpSchema = z.object({
@@ -25,8 +26,10 @@ export const parseBrief = createServerFn({ method: "POST" })
     const brief = data.text.trim().slice(0, 6000);
     if (brief.length < 20) return { ok: false, error: "Paste a fuller brief — a title alone is not enough." };
 
+    const session = await requireOrg().catch(() => null);
     const result = await completeJson({
       name: "parse-brief",
+      orgId: session?.orgId,
       temperature: 0.2,
       maxTokens: 1200,
       system:

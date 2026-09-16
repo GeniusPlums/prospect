@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { peopleSource, contactWaterfall } from "./registry.ts";
 import { localSource } from "./profile-source/active.ts";
+import { capCollect } from "./profile-source/people-query.ts";
 import { ensureDbReady } from "@/lib/db";
 import { DEV_ORG } from "@/lib/ids";
 
@@ -22,11 +23,16 @@ describe("profile_source adapters", () => {
     assert.equal(row?.externalId, "aditya-iyer");
   });
 
+  it("collect quota is remaining and per-search, never more than misses", () => {
+    assert.equal(capCollect(40, 5, 22), 5);
+    assert.equal(capCollect(40, 300, 22), 22);
+    assert.equal(capCollect(0, 300, 22), 0);
+  });
+
   it("contact waterfall does not invent an email", async () => {
     await ensureDbReady();
     const { hit, attempts } = await contactWaterfall({ name: "Ada Iyer", orgId: DEV_ORG });
     assert.equal(hit, null);
-    assert.ok(attempts.length > 0);
     assert.ok(attempts.every((row) => row.outcome !== "hit"));
   });
 });

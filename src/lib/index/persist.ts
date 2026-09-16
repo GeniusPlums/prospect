@@ -3,6 +3,24 @@ import { embedText } from "@/lib/embed";
 import { nid } from "@/lib/ids";
 import type { CollectedProfile } from "@/lib/adapters/profile-source/types";
 
+function extraSignalBody(raw: unknown): string {
+  if (!raw || typeof raw !== "object") return "";
+  const rec = raw as Record<string, unknown>;
+  const parts: string[] = [];
+  for (const key of ["summary", "about", "bio", "skills", "experience", "headline", "title", "location"]) {
+    const value = rec[key];
+    if (typeof value === "string" && value.trim()) parts.push(value.trim());
+    else if (Array.isArray(value)) {
+      const joined = value
+        .map((item) => (typeof item === "string" ? item : item && typeof item === "object" ? JSON.stringify(item) : ""))
+        .filter(Boolean)
+        .join("; ");
+      if (joined) parts.push(joined);
+    }
+  }
+  return parts.join("\n").slice(0, 4000);
+}
+
 export async function persistCollected(
   orgId: string,
   profiles: CollectedProfile[],
@@ -41,17 +59,22 @@ export async function persistCollected(
           0.7,
         ],
       );
+      const provenance = profile.linkedinUrl || `composio://${provider}/${profile.externalId}`;
       await sql(
         `INSERT INTO signal (id, candidate_id, kind, body, provenance_url, confidence)
          VALUES ($1,$2,'headline',$3,$4,0.8)
          ON CONFLICT (id) DO NOTHING`,
-        [
-          `sig_${candidateId}_0`,
-          candidateId,
-          profile.headline || profile.displayName,
-          profile.linkedinUrl || `composio://${provider}/${profile.externalId}`,
-        ],
+        [`sig_${candidateId}_0`, candidateId, profile.headline || profile.displayName, provenance],
       );
+      const extra = extraSignalBody(profile.raw);
+      if (extra) {
+        await sql(
+          `INSERT INTO signal (id, candidate_id, kind, body, provenance_url, confidence)
+           VALUES ($1,$2,'dossier',$3,$4,0.6)
+           ON CONFLICT (id) DO NOTHING`,
+          [`sig_${candidateId}_1`, candidateId, extra, provenance],
+        );
+      }
     }
     await sql(
       `INSERT INTO profile_source (id, provider, external_id, candidate_id, linkedin_url, raw_hash)

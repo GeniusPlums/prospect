@@ -4,7 +4,6 @@ import { AppShell } from "@/components/app-shell";
 import { PipelineRun } from "@/components/prospect/pipeline";
 import { Button } from "@/components/ui/button";
 import { loadSearch, runSearchPipeline, voteCandidate, doReveal, loadOutreach, doSend } from "@/lib/server/fns";
-import { getCandidate } from "@/lib/data/candidates";
 import { PersonAvatar } from "@/components/prospect/avatar";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -149,9 +148,17 @@ function SearchPage() {
           <p className="px-4 py-3 font-mono text-[10px] text-muted-foreground">
             cache {data.run.cache_hits} hit / {data.run.cache_misses} miss
           </p>
+          {open.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-muted-foreground">
+              No shortlist yet. Connect a sourcing toolkit on{" "}
+              <Link to="/connections" className="underline">
+                Connections
+              </Link>{" "}
+              and run the search again.
+            </p>
+          ) : null}
           {open.map((row) => {
-            const person = getCandidate(row.candidate_id);
-            const name = person?.name ?? people.get(row.candidate_id)?.display_name ?? row.candidate_id;
+            const name = people.get(row.candidate_id)?.display_name ?? row.candidate_id;
             return (
               <button
                 key={row.id}
@@ -179,7 +186,7 @@ function SearchPage() {
               <h2 className="text-xs font-medium text-block">Held back</h2>
               {held.map((row) => (
                 <p key={row.id} className="mt-2 text-sm">
-                  {getCandidate(row.candidate_id)?.name ?? people.get(row.candidate_id)?.display_name} — {JSON.stringify(row.held_back_rules)}
+                  {people.get(row.candidate_id)?.display_name ?? row.candidate_id} — {JSON.stringify(row.held_back_rules)}
                 </p>
               ))}
             </section>
@@ -190,16 +197,8 @@ function SearchPage() {
             <DossierPanel
               searchId={id}
               row={selected}
-              name={
-                getCandidate(selected.candidate_id)?.name ??
-                people.get(selected.candidate_id)?.display_name ??
-                selected.candidate_id
-              }
-              headline={
-                getCandidate(selected.candidate_id)?.headline ??
-                people.get(selected.candidate_id)?.headline ??
-                ""
-              }
+              name={people.get(selected.candidate_id)?.display_name ?? selected.candidate_id}
+              headline={people.get(selected.candidate_id)?.headline ?? ""}
               objections={objections}
               email={email}
               onVote={async (vote, tags) => {

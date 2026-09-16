@@ -1,6 +1,6 @@
 import { getCandidate } from "@/lib/data/candidates";
 import { detectDisqualifiers, narrate } from "@/lib/ranking";
-import type { Icp } from "@/lib/types";
+import type { Icp, Verdict } from "@/lib/types";
 
 export type RubricGrade = "strong_yes" | "yes" | "unclear" | "no" | "strong_no";
 
@@ -36,9 +36,9 @@ export function gradeFromText(input: {
     forWeight: yes / total,
     againstWeight: no / total,
     unclearWeight: unclear.length / total,
-    verdict: yes >= no ? ("mixed" as const) : ("weak" as const),
+    verdict: (yes >= no ? "mixed" : "weak") as Verdict,
     disqualified: false,
-    disqualifierFlags: [],
+    disqualifierFlags: [] as { flag: string }[],
     criterionGrades: mustGrades,
     reviewerObjections: [
       {

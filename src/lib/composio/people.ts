@@ -1,21 +1,16 @@
-import { candidates } from "@/lib/data/candidates";
-import { localSource } from "@/lib/adapters/profile-source/local";
 import type { CollectedProfile, PeopleSource, SearchHit } from "@/lib/adapters/profile-source/types";
-import { executeIntent, firstActive } from "@/lib/composio/client";
+import { firstActiveForRole, executeIntent } from "@/lib/composio/client";
 import { parsePeople } from "@/lib/composio/parse";
 
-const SOURCING = ["apollo", "linkedin", "peopledatalabs"] as const;
-
 export async function composioPeopleSource(orgId: string): Promise<PeopleSource | null> {
-  const connection = await firstActive(orgId, SOURCING);
+  const connection = await firstActiveForRole(orgId, "sourcing");
   if (!connection) return null;
 
   const extras = new Map<string, CollectedProfile>();
 
   const source: PeopleSource = {
-    name: "composio",
+    name: connection.toolkit,
     async search(query) {
-      const localHits = await localSource.search(query);
       const icp = (query as { icp?: { title?: string; skills?: string[]; locations?: string[] } }).icp;
       const result = await executeIntent({
         orgId,
@@ -41,20 +36,18 @@ export async function composioPeopleSource(orgId: string): Promise<PeopleSource 
           raw: person.raw,
         });
       }
-      const seen = new Set(localHits.map((hit) => hit.externalId));
-      const remote: SearchHit[] = people
-        .filter((person) => !seen.has(person.externalId))
-        .map((person) => ({ externalId: person.externalId, cacheKey: person.linkedinUrl || person.externalId }));
-      return [...localHits, ...remote];
+      return people.map(
+        (person): SearchHit => ({
+          externalId: person.externalId,
+          cacheKey: person.linkedinUrl || person.externalId,
+        }),
+      );
     },
     async collect(ids) {
-      const localIds = ids.filter((id) => candidates.some((person) => person.id === id));
-      const remoteIds = ids.filter((id) => !localIds.includes(id));
-      const collected = localIds.length ? await localSource.collect(localIds) : [];
-      const fromSearch = remoteIds
+      const fromSearch = ids
         .map((id) => extras.get(id))
         .filter((row): row is CollectedProfile => Boolean(row));
-      const missing = remoteIds.filter((id) => !extras.has(id));
+      const missing = ids.filter((id) => !extras.has(id));
       if (missing.length) {
         const result = await executeIntent({
           orgId,
@@ -75,7 +68,7 @@ export async function composioPeopleSource(orgId: string): Promise<PeopleSource 
           });
         }
       }
-      return [...collected, ...fromSearch];
+      return fromSearch;
     },
   };
   return source;

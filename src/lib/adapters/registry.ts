@@ -1,17 +1,29 @@
-import { localSource, remotePeople } from "./profile-source/active";
+import { localSource } from "./profile-source/active";
 import type { PeopleSource } from "./profile-source/types";
-import { executeIntent, firstActive, listActiveConnections } from "@/lib/composio/client";
+import { executeIntent, firstActiveForRole, listActiveConnections } from "@/lib/composio/client";
 import { findEmail, parseAtsPeople } from "@/lib/composio/parse";
 import { composioPeopleSource } from "@/lib/composio/people";
+import { DEV_ORG } from "@/lib/ids";
+
+const emptySource: PeopleSource = {
+  name: "none",
+  async search() {
+    return [];
+  },
+  async collect() {
+    return [];
+  },
+};
 
 export function peopleSource(): PeopleSource {
-  const mode = process.env.PROSPECT_PEOPLE_PROVIDER ?? "local";
-  if (mode === "local") return localSource;
-  return remotePeople;
+  return localSource;
 }
 
 export async function peopleSourceForOrg(orgId: string): Promise<PeopleSource> {
-  return (await composioPeopleSource(orgId)) ?? peopleSource();
+  const connected = await composioPeopleSource(orgId);
+  if (connected) return connected;
+  if (orgId === DEV_ORG) return localSource;
+  return emptySource;
 }
 
 export type ArtifactHit = { url: string; title: string; markdown: string };
@@ -35,23 +47,15 @@ export async function contactWaterfall(input: {
   domain?: string;
 }): Promise<{ attempts: { provider: string; outcome: string; costUsd: number }[]; hit: ContactHit | null }> {
   const attempts: { provider: string; outcome: string; costUsd: number }[] = [];
-  const vendors = [
-    { toolkit: "hunter", needles: ["email", "find"], costUsd: 0.1 },
-    { toolkit: "peopledatalabs", needles: ["enrich", "email"], costUsd: 0.15 },
-    { toolkit: "apollo", needles: ["email", "people"], costUsd: 0.1 },
-  ] as const;
+  const connections = await listActiveConnections(input.orgId);
+  if (connections.length === 0) return { attempts, hit: null };
 
-  for (const vendor of vendors) {
-    const connection = await firstActive(input.orgId, [vendor.toolkit]);
-    if (!connection) {
-      attempts.push({ provider: vendor.toolkit, outcome: "skipped_not_connected", costUsd: 0 });
-      continue;
-    }
+  for (const connection of connections) {
     const result = await executeIntent({
       orgId: input.orgId,
       toolkit: connection.toolkit,
       connectedAccountId: connection.connected_account_id,
-      needles: [...vendor.needles],
+      needles: ["email", "find"],
       arguments: {
         full_name: input.name,
         name: input.name,
@@ -59,15 +63,19 @@ export async function contactWaterfall(input: {
         company: input.domain ?? "",
       },
     });
+    if (result.successful === false && result.error?.startsWith("No ")) {
+      attempts.push({ provider: connection.toolkit, outcome: "skipped_no_email_tool", costUsd: 0 });
+      continue;
+    }
     const email = findEmail(result.data);
     if (email) {
-      attempts.push({ provider: vendor.toolkit, outcome: "hit", costUsd: vendor.costUsd });
-      return { attempts, hit: { email, provider: vendor.toolkit, costUsd: vendor.costUsd } };
+      attempts.push({ provider: connection.toolkit, outcome: "hit", costUsd: 0.1 });
+      return { attempts, hit: { email, provider: connection.toolkit, costUsd: 0.1 } };
     }
     attempts.push({
-      provider: vendor.toolkit,
+      provider: connection.toolkit,
       outcome: result.successful === false ? "error" : "miss",
-      costUsd: vendor.costUsd,
+      costUsd: 0.1,
     });
   }
   return { attempts, hit: null };
@@ -79,7 +87,7 @@ export async function verifyEmail(email: string): Promise<boolean> {
 }
 
 export async function mergeAtsFetch(orgId: string) {
-  const connection = await firstActive(orgId, ["greenhouse", "lever", "ashby", "workday", "bamboohr"]);
+  const connection = await firstActiveForRole(orgId, "ats", ["list", "candidate"]);
   if (!connection) return [];
   const result = await executeIntent({
     orgId,
@@ -95,7 +103,7 @@ export async function mergeAtsFetch(orgId: string) {
 }
 
 export async function writeAtsRemote(orgId: string, candidateName: string, payload: unknown) {
-  const connection = await firstActive(orgId, ["greenhouse", "lever", "ashby", "workday", "bamboohr"]);
+  const connection = await firstActiveForRole(orgId, "ats", ["create", "candidate"]);
   if (!connection) return { ok: false as const, error: "Connect an ATS on Connections first" };
   const result = await executeIntent({
     orgId,
@@ -120,9 +128,9 @@ export async function sendViaConnectedInbox(input: {
   to: string;
   subject: string;
   body: string;
-}): Promise<{ via: "gmail" | "outlook" | "none"; ok: boolean; error?: string }> {
-  const connection = await firstActive(input.orgId, ["gmail", "outlook"]);
-  if (!connection) return { via: "none", ok: false, error: "Connect Gmail or Outlook to send" };
+}): Promise<{ via: string; ok: boolean; error?: string }> {
+  const connection = await firstActiveForRole(input.orgId, "outreach");
+  if (!connection) return { via: "none", ok: false, error: "Connect an inbox on Connections to send" };
   const result = await executeIntent({
     orgId: input.orgId,
     toolkit: connection.toolkit,
@@ -137,21 +145,9 @@ export async function sendViaConnectedInbox(input: {
     },
   });
   if (result.successful === false) {
-    return { via: connection.toolkit as "gmail" | "outlook", ok: false, error: result.error ?? "Send failed" };
+    return { via: connection.toolkit, ok: false, error: result.error ?? "Send failed" };
   }
-  return { via: connection.toolkit as "gmail" | "outlook", ok: true };
-}
-
-export async function completeLlm(promptName: string, input: string): Promise<string | null> {
-  void promptName;
-  void input;
-  const { completeJson } = await import("@/lib/ai/complete");
-  const result = await completeJson({
-    name: promptName,
-    system: "Return the requested text only.",
-    user: input,
-  });
-  return result.ok ? result.text : null;
+  return { via: connection.toolkit, ok: true };
 }
 
 export { listActiveConnections };

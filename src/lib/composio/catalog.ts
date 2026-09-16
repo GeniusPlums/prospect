@@ -1,16 +1,37 @@
-export const RECOMMENDED = [
-  { slug: "greenhouse", lane: "hr" as const, label: "Greenhouse", blurb: "Create candidates and read stages" },
-  { slug: "lever", lane: "hr" as const, label: "Lever", blurb: "Opportunities and sourced origin" },
-  { slug: "ashby", lane: "hr" as const, label: "Ashby", blurb: "Jobs and applications" },
-  { slug: "workday", lane: "hr" as const, label: "Workday", blurb: "HRIS write-back" },
-  { slug: "bamboohr", lane: "hr" as const, label: "BambooHR", blurb: "Employee records" },
-  { slug: "apollo", lane: "sourcing" as const, label: "Apollo", blurb: "People search on cache miss" },
-  { slug: "hunter", lane: "sourcing" as const, label: "Hunter", blurb: "Email on reveal only" },
-  { slug: "peopledatalabs", lane: "sourcing" as const, label: "People Data Labs", blurb: "Profile enrich on click" },
-  { slug: "linkedin", lane: "sourcing" as const, label: "LinkedIn", blurb: "Limited member scopes" },
-  { slug: "gmail", lane: "outreach" as const, label: "Gmail", blurb: "Send after a reveal" },
-  { slug: "outlook", lane: "outreach" as const, label: "Outlook", blurb: "Send after a reveal" },
-  { slug: "slack", lane: "outreach" as const, label: "Slack", blurb: "Notify hiring channel" },
-] as const;
+export type CatalogItem = {
+  slug: string;
+  label: string;
+  blurb: string;
+  category: string;
+};
 
-export type ToolkitLane = (typeof RECOMMENDED)[number]["lane"];
+export type CatalogCategory = { id: string; name: string };
+
+export type RuntimeRole = "llm" | "sourcing" | "ats" | "outreach";
+
+export type ToolkitLane = RuntimeRole | "other";
+
+/** Map Composio category names/slugs to a runtime job. Not a toolkit allowlist. */
+export function roleFromCategoryText(text: string): RuntimeRole | null {
+  const t = text.toLowerCase();
+  if (/ai[- ]models?|\bllm\b|language models?|generative ai|openai/.test(t)) return "llm";
+  if (/talent intelligence|people data|people search|contact data|\bsourcing\b|\bsource\b/.test(t)) return "sourcing";
+  if (/\bats\b|applicant|hris|human resources?|\bhr\b|recruiting/.test(t)) return "ats";
+  if (/\bemail\b|\bmail\b|inbox|messaging|communication|outreach/.test(t)) return "outreach";
+  return null;
+}
+
+export function roleFromCategories(categories: { name?: string; slug?: string }[]): RuntimeRole | null {
+  for (const category of categories) {
+    const hit = roleFromCategoryText(`${category.slug ?? ""} ${category.name ?? ""}`);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+export const ROLE_NEEDLES: Record<RuntimeRole, string[]> = {
+  llm: ["chat", "completion"],
+  sourcing: ["search", "people"],
+  ats: ["candidate"],
+  outreach: ["send", "email"],
+};

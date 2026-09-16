@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { findEmail, parsePeople } from "./parse.ts";
-import { RECOMMENDED } from "./catalog.ts";
+import { extractChatText, findEmail, parsePeople } from "./parse.ts";
 
 describe("composio parse", () => {
   it("finds a nested email and ignores example.com", () => {
@@ -17,8 +16,10 @@ describe("composio parse", () => {
     assert.equal(people[0]?.displayName, "Ada Iyer");
   });
 
-  it("catalog covers the three lanes", () => {
-    const lanes = new Set(RECOMMENDED.map((item) => item.lane));
-    assert.deepEqual([...lanes].sort(), ["hr", "outreach", "sourcing"]);
+  it("extracts chat text from OpenAI-shaped envelopes", () => {
+    assert.equal(
+      extractChatText({ choices: [{ message: { content: '{"title":"Eng"}' } }] }),
+      '{"title":"Eng"}',
+    );
   });
 });

@@ -61,4 +61,28 @@ describe("pipeline", () => {
     );
     assert.equal(Number(again[0]?.n ?? 0), n);
   });
+
+  it("signed-in orgs do not rank the eval fixture index", async () => {
+    await ensureDbReady();
+    await sql(`INSERT INTO org (id, name, plan) VALUES ($1,$2,'pro') ON CONFLICT (id) DO NOTHING`, [
+      "org_user_test",
+      "User test",
+    ]);
+    const icp = await writeIcpVersion({
+      orgId: "org_user_test",
+      roleKey: "payments-backend-user",
+      icp: sampleBriefs[0]!.icp,
+      authorType: "user",
+    });
+    const id = await createAndRunSearch({
+      orgId: "org_user_test",
+      icp,
+      briefText: sampleBriefs[0]!.jd,
+    });
+    const scores = await sql<{ n: string }>(
+      `SELECT count(*)::text as n FROM candidate_score WHERE search_run_id=$1`,
+      [id],
+    );
+    assert.equal(Number(scores[0]?.n ?? 0), 0);
+  });
 });

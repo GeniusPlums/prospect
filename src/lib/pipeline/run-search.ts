@@ -1,13 +1,14 @@
 import { insertMany, sql, sqlOne } from "@/lib/db";
-import { nid } from "@/lib/ids";
+import { DEV_ORG, nid } from "@/lib/ids";
 import { peopleSourceForOrg } from "@/lib/adapters/registry";
+import { capCollect } from "@/lib/adapters/profile-source/people-query";
 import { cosine, embedText } from "@/lib/embed";
-import { applyFeedbackRerank, proposeIcpDiff, runSearch } from "@/lib/ranking";
+import { applyFeedbackRerank, proposeIcpDiff } from "@/lib/ranking";
 import { getIcp, proposeIcpDiffVersion, type StoredIcp } from "@/lib/icp/engine";
-import { gradeCandidate, gradeFromText } from "@/lib/scoring/grade-candidate";
-import { recordUsage } from "@/lib/billing/meter";
-import { cachedIds, corpusOrgIds } from "@/lib/index/corpus";
+import { remaining, recordUsage } from "@/lib/billing/meter";
+import { cachedIds, loadDossiers } from "@/lib/index/corpus";
 import { persistCollected } from "@/lib/index/persist";
+import { gradeDossiers } from "@/lib/ai/grade-dossiers";
 import { MODEL_VERSIONS, PROMPT_VERSIONS } from "../../../prompts/versions.ts";
 import type { FeedbackVote } from "@/lib/types";
 
@@ -56,11 +57,20 @@ export async function executeSearchRun(searchId: string): Promise<string> {
   const icp = await getIcp(run.icp_version_id);
   if (!icp) throw new Error("ICP missing");
 
+  const evalOnly = run.org_id === DEV_ORG;
   const source = await peopleSourceForOrg(run.org_id);
-  const hits = await source.search({ icp });
-  const ids = hits.map((h) => h.externalId);
+  let hits: { externalId: string; cacheKey: string }[] = [];
+  try {
+    hits = await source.search({ icp });
+  } catch (err) {
+    await emit(searchId, {
+      step: "search",
+      message: err instanceof Error ? err.message : "People search failed",
+    });
+  }
 
-  const { hits: cacheHits, misses } = await cachedIds(run.org_id, ids);
+  const ids = hits.map((h) => h.externalId);
+  const { hits: cacheHits, misses } = await cachedIds(run.org_id, ids, evalOnly);
   await sql(`UPDATE search_run SET cache_hits=$2, cache_misses=$3 WHERE id=$1`, [
     searchId,
     cacheHits.length,
@@ -72,118 +82,81 @@ export async function executeSearchRun(searchId: string): Promise<string> {
     counts: { hits: cacheHits.length, misses: misses.length },
   });
 
-  if (misses.length) {
-    await emit(searchId, { step: "collect", message: `Collect ${misses.length} misses only` });
-    const collected = await source.collect(misses);
-    await persistCollected(run.org_id, collected, source.name);
-    await recordUsage(run.org_id, "profile", misses.length);
-    await sql(`UPDATE search_run SET profiles_charged=$2 WHERE id=$1`, [searchId, misses.length]);
+  const quota = await remaining(run.org_id, "pro", "profile");
+  const wantCollect = Math.max(0, 22 - cacheHits.length);
+  const toCollect = misses.slice(0, capCollect(wantCollect, quota, 22));
+  const candidateIds = cacheHits.map((row) => row.candidateId);
+
+  if (toCollect.length) {
+    await emit(searchId, { step: "collect", message: `Collect ${toCollect.length} cache misses` });
+    const collected = await source.collect(toCollect);
+    const persisted = await persistCollected(run.org_id, collected, source.name);
+    candidateIds.push(...persisted);
+    await recordUsage(run.org_id, "profile", collected.length);
+    await sql(`UPDATE search_run SET profiles_charged=$2 WHERE id=$1`, [searchId, collected.length]);
+  } else if (misses.length && quota <= 0) {
+    await emit(searchId, { step: "collect", message: "Collect skipped — profile quota exhausted" });
   } else {
-    await emit(searchId, { step: "collect", message: "Collect skipped — warm index hit 100%" });
+    await emit(searchId, { step: "collect", message: "Collect skipped — warm index hit" });
   }
 
-  await emit(searchId, { step: "stage1", message: "Hybrid retrieval → working set" });
-  const queryVec = embedText([icp.title, icp.summary, ...icp.must, ...icp.skills].join(" "));
-  const [userOrg, sharedOrg] = corpusOrgIds(run.org_id);
-  const corpus = await sql<{ id: string; embedding: number[] | string }>(
-    `SELECT id, embedding FROM candidate WHERE org_id=$1 OR org_id=$2`,
-    [userOrg, sharedOrg],
-  );
-  const hybrid = corpus
-    .map((row) => {
-      const vec = Array.isArray(row.embedding)
-        ? row.embedding
-        : typeof row.embedding === "string"
-          ? (JSON.parse(row.embedding) as number[])
-          : [];
-      return { id: row.id, sim: cosine(queryVec, vec) };
-    })
-    .sort((a, b) => b.sim - a.sim)
-    .slice(0, 300);
+  const uniqueIds = [...new Set(candidateIds)];
+  if (uniqueIds.length === 0) {
+    const message = evalOnly
+      ? "No people in the eval index for this brief"
+      : "No people yet. Connect a sourcing toolkit on Connections, then search again.";
+    await emit(searchId, { step: "done", message });
+    await sql(`UPDATE search_run SET status='done', completed_at=now() WHERE id=$1`, [searchId]);
+    return searchId;
+  }
 
-  const graded = runSearch(icp, 22);
-  const allowed = new Set(hybrid.map((h) => h.id));
-  const shortlist = graded.filter((g) => allowed.has(g.candidateId) || allowed.size === 0);
-  const shortlistIds = new Set(shortlist.map((row) => row.candidateId));
-  const extras = hybrid.filter((row) => !shortlistIds.has(row.id)).slice(0, Math.max(0, 22 - shortlist.length));
+  await emit(searchId, { step: "stage1", message: "Rank collected dossiers only" });
+  const queryVec = embedText([icp.title, icp.summary, ...icp.must, ...icp.skills].join(" "));
+  const dossiers = await loadDossiers(uniqueIds);
+  const ranked = dossiers
+    .map((dossier) => ({ dossier, sim: cosine(queryVec, embedText(dossier.hay)) }))
+    .sort((a, b) => b.sim - a.sim)
+    .slice(0, 22)
+    .map((row) => row.dossier);
 
   await emit(searchId, {
     step: "stage2",
-    message: `Rubric grading ${shortlist.length + extras.length} · prompt ${PROMPT_VERSIONS.gradeRubric}`,
+    message: evalOnly
+      ? `Heuristic grading ${ranked.length} · prompt ${PROMPT_VERSIONS.gradeRubric}`
+      : `LLM grading ${ranked.length} · prompt ${PROMPT_VERSIONS.gradeRubric}`,
   });
   await emit(searchId, { step: "disqualifier", message: "Disqualifier pass (separate)" });
 
-  const heldRules = icp.disqualifiers;
+  const grades = await gradeDossiers({
+    orgId: run.org_id,
+    icp,
+    dossiers: ranked,
+    useLlm: !evalOnly,
+  });
+
   const scoreRows: unknown[][] = [];
   const gradeRows: unknown[][] = [];
   const objectionRows: unknown[][] = [];
 
-  for (const [i, row] of shortlist.entries()) {
-    const detail = gradeCandidate(row.candidateId, icp);
+  for (const [i, dossier] of ranked.entries()) {
+    const detail = grades.get(dossier.id);
     if (!detail) continue;
-    const hard = row.disqualifiers.filter((d) =>
-      heldRules.some(
-        (r) => d.flag.toLowerCase().includes(r.slice(0, 8).toLowerCase()) || r.toLowerCase().includes(d.flag.toLowerCase()),
+    const heldRules = icp.disqualifiers.filter((rule) =>
+      detail.disqualifierFlags.some(
+        (flag) =>
+          flag.flag.toLowerCase().includes(rule.slice(0, 8).toLowerCase()) ||
+          rule.toLowerCase().includes(flag.flag.toLowerCase()),
       ),
     );
-    const heldBack =
-      hard.length > 0 &&
-      row.verdict === "flagged" &&
-      row.disqualifiers.some(
-        (d) => d.flag === "Services-only background" || d.flag === "Keyword-stuffed profile" || d.flag === "US-bound",
-      );
+    const heldBack = detail.verdict === "flagged" && heldRules.length > 0;
     const scoreId = nid("scr");
+    const rank = i + 1;
     scoreRows.push([
       scoreId,
       searchId,
-      row.candidateId,
+      dossier.id,
       icp.id,
-      MODEL_VERSIONS.heuristic,
-      PROMPT_VERSIONS.gradeRubric,
-      detail.caseFor,
-      detail.caseAgainst,
-      JSON.stringify(detail.unclear),
-      row.verdict,
-      detail.disqualified,
-      JSON.stringify(row.disqualifiers),
-      detail.forWeight,
-      detail.againstWeight,
-      detail.unclearWeight,
-      i + 1,
-      heldBack ? null : row.rank,
-      heldBack,
-      JSON.stringify(heldBack ? row.disqualifiers.map((d) => d.flag) : []),
-    ]);
-    for (const g of detail.criterionGrades) {
-      gradeRows.push([nid("grd"), scoreId, g.criterionId, g.grade, g.evidence]);
-    }
-    for (const obj of detail.reviewerObjections) {
-      objectionRows.push([nid("obj"), scoreId, obj.claim, obj.objection]);
-    }
-  }
-
-  for (const [offset, extra] of extras.entries()) {
-    const stored = await sqlOne<{ display_name: string; headline: string; city: string }>(
-      `SELECT display_name, headline, city FROM candidate WHERE id=$1`,
-      [extra.id],
-    );
-    if (!stored) continue;
-    const signals = await sql<{ body: string }>(`SELECT body FROM signal WHERE candidate_id=$1`, [extra.id]);
-    const detail = gradeFromText({
-      displayName: stored.display_name,
-      headline: stored.headline,
-      city: stored.city,
-      hay: [stored.display_name, stored.headline, stored.city, ...signals.map((s) => s.body)].join(" "),
-      icp,
-    });
-    const scoreId = nid("scr");
-    const rank = shortlist.length + offset + 1;
-    scoreRows.push([
-      scoreId,
-      searchId,
-      extra.id,
-      icp.id,
-      MODEL_VERSIONS.heuristic,
+      detail.modelVersion || MODEL_VERSIONS.heuristic,
       PROMPT_VERSIONS.gradeRubric,
       detail.caseFor,
       detail.caseAgainst,
@@ -195,9 +168,9 @@ export async function executeSearchRun(searchId: string): Promise<string> {
       detail.againstWeight,
       detail.unclearWeight,
       rank,
-      rank,
-      false,
-      JSON.stringify([]),
+      heldBack ? null : rank,
+      heldBack,
+      JSON.stringify(heldBack ? heldRules : []),
     ]);
     for (const g of detail.criterionGrades) {
       gradeRows.push([nid("grd"), scoreId, g.criterionId, g.grade, g.evidence]);
@@ -246,7 +219,7 @@ export async function executeSearchRun(searchId: string): Promise<string> {
   );
 
   await emit(searchId, { step: "reviewer", message: "Reviewer objections posted (rank unchanged)" });
-  await emit(searchId, { step: "done", message: "Shortlist ready · zero enrichment spend" });
+  await emit(searchId, { step: "done", message: `Shortlist ready · ${ranked.length} people` });
   await sql(`UPDATE search_run SET status='done', completed_at=now() WHERE id=$1`, [searchId]);
   return searchId;
 }

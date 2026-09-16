@@ -32,7 +32,7 @@ export async function revealContact(input: {
     );
   }
   if (!hit) {
-    return { ok: false as const, error: "No email found. Connect Hunter, Apollo, or PDL on Connections." };
+    return { ok: false as const, error: "No email found. Connect a people or contact toolkit on Connections." };
   }
   const verified = await verifyEmail(hit.email);
   await sql(
@@ -46,7 +46,10 @@ export async function revealContact(input: {
 }
 
 export async function draftGroundedOutreach(searchRunId: string, candidateId: string) {
-  const run = await sql<{ icp_version_id: string }>(`SELECT icp_version_id FROM search_run WHERE id=$1`, [searchRunId]);
+  const run = await sql<{ icp_version_id: string; org_id: string }>(
+    `SELECT icp_version_id, org_id FROM search_run WHERE id=$1`,
+    [searchRunId],
+  );
   const icp = await getIcp(run[0]!.icp_version_id);
   const candidate = getCandidate(candidateId);
   const stored = candidate
@@ -66,6 +69,7 @@ export async function draftGroundedOutreach(searchRunId: string, candidateId: st
     const subject = draftOutreachSubject(candidate, icp);
     const llm = await completeJson({
       name: "draft-outreach",
+      orgId: run[0]?.org_id,
       system:
         "Write a short recruiting email grounded only in the provided facts. No invented employers, talks, or repos. Return JSON { subject, body }.",
       user: JSON.stringify({ icp: { title: icp.title, must: icp.must }, candidate: candidate.name, facts, draft: body }),

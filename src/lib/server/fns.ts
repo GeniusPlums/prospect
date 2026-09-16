@@ -13,8 +13,7 @@ import { runEvalSuite } from "@/lib/eval/run-eval";
 import { nid } from "@/lib/ids";
 import { requireOrg } from "@/lib/auth/session";
 import { loadPeople } from "@/lib/index/corpus";
-import { RECOMMENDED } from "@/lib/composio/catalog";
-import { startConnect, syncOrgConnections } from "@/lib/composio/client";
+import { composioConfigured, listCatalogCategories, listCatalogPage, startConnect, syncOrgConnections } from "@/lib/composio/client";
 import type { Icp, FeedbackVote } from "@/lib/types";
 
 async function boot() {
@@ -313,10 +312,28 @@ export const persistEval = createServerFn({ method: "POST" }).handler(async () =
 
 export const listConnections = createServerFn({ method: "GET" }).handler(async () => {
   const session = await org().catch(() => null);
-  if (!session) return { ok: false as const, error: "Sign in required", catalog: RECOMMENDED, connections: [] };
-  const connections = await syncOrgConnections(session.orgId);
-  return { ok: true as const, catalog: RECOMMENDED, connections };
+  if (!session) {
+    return {
+      ok: false as const,
+      error: "Sign in required",
+      configured: composioConfigured(),
+      categories: [],
+      connections: [] as { toolkit: string; status: string; connected_account_id: string }[],
+    };
+  }
+  const [connections, categories] = await Promise.all([
+    syncOrgConnections(session.orgId),
+    listCatalogCategories(),
+  ]);
+  return { ok: true as const, configured: composioConfigured(), categories, connections };
 });
+
+export const listToolkitCatalog = createServerFn({ method: "GET" })
+  .validator((input: { category?: string; cursor?: string }) => input)
+  .handler(async ({ data }) => {
+    await org();
+    return listCatalogPage({ category: data.category, cursor: data.cursor });
+  });
 
 export const connectToolkit = createServerFn({ method: "POST" })
   .validator((input: { toolkit: string; origin: string }) => input)

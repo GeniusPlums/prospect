@@ -1,7 +1,11 @@
 import { Langfuse } from "langfuse";
+import { connectionsForRole, executeIntent, pickToolSlug } from "@/lib/composio/client";
+import { ROLE_NEEDLES } from "@/lib/composio/catalog";
+import { extractChatText } from "@/lib/composio/parse";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_MODEL = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
+const MODEL_TRIES = [DEFAULT_MODEL, "gpt-4o-mini", "gpt-4o", "llama-3.3-70b-versatile"];
 
 function langfuse() {
   const secretKey = process.env.LANGFUSE_SECRET_KEY;
@@ -23,7 +27,7 @@ export function extractJson(text: string): unknown {
   return JSON.parse(raw.slice(start, end + 1));
 }
 
-export async function completeJson(input: {
+async function groqFallback(input: {
   name: string;
   system: string;
   user: string;
@@ -31,10 +35,10 @@ export async function completeJson(input: {
   maxTokens?: number;
 }): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const apiKey = process.env.GROQ_API_KEY;
-  if (!apiKey) return { ok: false, error: "GROQ_API_KEY is not set" };
+  if (!apiKey) return { ok: false, error: "No LLM connected. Connect one on Connections." };
 
   const lf = langfuse();
-  const trace = lf?.trace({ name: input.name, metadata: { model: DEFAULT_MODEL } });
+  const trace = lf?.trace({ name: input.name, metadata: { model: DEFAULT_MODEL, via: "env-groq-fallback" } });
   const started = Date.now();
 
   try {
@@ -84,4 +88,46 @@ export async function completeJson(input: {
   } finally {
     await lf?.flushAsync().catch(() => undefined);
   }
+}
+
+export async function completeJson(input: {
+  name: string;
+  system: string;
+  user: string;
+  temperature?: number;
+  maxTokens?: number;
+  orgId?: string;
+}): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+  const messages = [
+    { role: "system", content: input.system },
+    { role: "user", content: input.user },
+  ];
+
+  if (input.orgId) {
+    const connections = await connectionsForRole(input.orgId, "llm");
+    for (const connection of connections) {
+      const slug = await pickToolSlug(connection.toolkit, ROLE_NEEDLES.llm);
+      if (!slug) continue;
+      for (const model of MODEL_TRIES) {
+        const result = await executeIntent({
+          orgId: input.orgId,
+          toolkit: connection.toolkit,
+          connectedAccountId: connection.connected_account_id,
+          needles: ["chat", "completion"],
+          arguments: {
+            model,
+            messages,
+            temperature: input.temperature ?? 0.2,
+            max_tokens: input.maxTokens ?? 1200,
+            max_completion_tokens: input.maxTokens ?? 1200,
+          },
+        });
+        if (result.successful === false) continue;
+        const text = extractChatText(result.data);
+        if (text) return { ok: true, text };
+      }
+    }
+  }
+
+  return groqFallback(input);
 }

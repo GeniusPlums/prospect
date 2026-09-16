@@ -114,3 +114,43 @@ export function parseAtsPeople(data: unknown): { mergeId: string; name: string; 
     outcome: asString((person.raw as Record<string, unknown> | undefined)?.outcome) || null,
   }));
 }
+
+/** Pull assistant text from OpenAI/Groq Composio tool envelopes. */
+export function extractChatText(data: unknown, depth = 0): string {
+  if (depth > 8 || data == null) return "";
+  if (typeof data === "string") {
+    const trimmed = data.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return extractChatText(JSON.parse(trimmed), depth + 1) || trimmed;
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const hit = extractChatText(item, depth + 1);
+      if (hit) return hit;
+    }
+    return "";
+  }
+  if (typeof data === "object") {
+    const rec = data as Record<string, unknown>;
+    const choices = rec.choices;
+    if (Array.isArray(choices)) {
+      const content = (choices[0] as { message?: { content?: unknown } } | undefined)?.message?.content;
+      const fromChoice = extractChatText(content, depth + 1);
+      if (fromChoice) return fromChoice;
+    }
+    for (const key of ["output_text", "content", "text", "data", "response"]) {
+      if (key in rec) {
+        const hit = extractChatText(rec[key], depth + 1);
+        if (hit) return hit;
+      }
+    }
+  }
+  return "";
+}

@@ -121,7 +121,12 @@ export function BriefHome() {
             A reason for each.
           </h1>
           <p className="mt-5 max-w-xl text-base text-muted-foreground">
-            Ranked twenty with a case for, a case against, and contact only when you spend a reveal.
+            Ranked twenty with a case for, a case against, and contact only when you spend a reveal. Connect your
+            own tools on{" "}
+            <Link to="/connections" className="underline">
+              Connections
+            </Link>{" "}
+            — any toolkit Composio lists.
           </p>
           <div className="mt-6">
             <FlowSteps current={1} />

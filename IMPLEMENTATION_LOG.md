@@ -34,3 +34,11 @@
 
 **Tested.** `npm test` (20 pass: eval, icp, pipeline cache-hit, billing, adapters waterfall, insertMany, extractJson, composio parse). `npx tsc --noEmit`. `npm run eval` (NDCG@10 ≈ 0.92, P@5 0.70, disqualifier recall 1.0).
 
+## 2026-09-16 — User-owned Composio catalog (no shortlist)
+
+**What changed.** Connections lists every Composio toolkit from the API (paginated, grouped by Composio category). Runtime resolves LLM / sourcing / ATS / outreach by category + connected tool needles, not a slug allowlist. Production search ranks collected DB dossiers only; the 36-person fixture index stays `org_local` eval/dev. Groq is last-resort when no LLM is connected. Cache-before-collect, quota-gated collect, no invented emails.
+
+**Why.** Prospect is the harness. Users connect whatever they already have on Composio; we do not sell Coresignal or limit the catalog to examples.
+
+**Tested.** `npm test` (eval, icp, pipeline cache-hit + empty user-org, billing, adapters quota/waterfall, insertMany, extractJson, catalog roles, composio parse). `npx tsc --noEmit`. `npm run eval`.
+
