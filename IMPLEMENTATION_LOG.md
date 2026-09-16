@@ -40,5 +40,5 @@
 
 **Why.** Prospect is the harness. Users connect whatever they already have on Composio; we do not sell Coresignal or limit the catalog to examples.
 
-**Tested.** `npm test` (eval, icp, pipeline cache-hit + empty user-org, billing, adapters quota/waterfall, insertMany, extractJson, catalog roles, composio parse). `npx tsc --noEmit`. `npm run eval`.
+**Tested.** `npm test` (eval, icp, pipeline cache-hit + empty user-org, billing, adapters quota/waterfall, insertMany, extractJson, catalog roles, composio parse). `npx tsc --noEmit`. `npm run eval`. Production alias `https://prospect-chi-lyart.vercel.app` deployed from `ready-to-ship` (`e192d20`). Connections lists Composio’s catalog; signed-in searches no longer rank the 36-person eval fixtures.
 
