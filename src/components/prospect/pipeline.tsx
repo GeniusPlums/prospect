@@ -15,16 +15,14 @@ export function PipelineRun({
   return (
     <div className="mx-auto flex min-h-[70dvh] max-w-2xl flex-col justify-center px-4 py-16 sm:px-6">
       <FlowSteps current={3} />
-      <div className="mt-6 flex flex-wrap items-center gap-2">
-        <h1 className="font-display text-3xl tracking-tight">Finding</h1>
-        {toolkit ? (
-          <span className="rounded-full border border-border px-2 py-0.5 text-xs">{toolkit}</span>
-        ) : null}
+      <div className="mt-6 flex flex-wrap items-baseline gap-3">
+        <h1 className="font-display text-4xl tracking-tight">Finding</h1>
+        {toolkit ? <span className="font-ui text-sm text-stamp">{toolkit}</span> : null}
       </div>
-      <p className="mt-2 max-w-md text-sm text-muted-foreground">
+      <p className="mt-2 max-w-md font-sans text-lg leading-snug">
         Named toolkit. Cache first, collect on miss, spend visible. Contact stays hidden until you ask.
       </p>
-      <div className="mt-6 grid grid-cols-3 gap-3 rounded-xl border border-border bg-card p-4 text-sm">
+      <div className="mt-6 grid grid-cols-3 gap-6 border-y border-border py-4 font-ui text-sm">
         <div>
           <p className="text-xs text-muted-foreground">Cache</p>
           <p className="font-medium">{cache ? cache.message.replace("Cache check · ", "") : "…"}</p>

@@ -1,6 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent } from "react";
 import { AppShell } from "@/components/app-shell";
+import { DeskStrip } from "@/components/desk";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { authClient } from "@/lib/auth/client";
@@ -44,49 +45,77 @@ function SignInPage() {
   }
 
   return (
-    <AppShell>
-      <main className="mx-auto max-w-md space-y-6 px-4 py-16">
-        <h1 className="font-display text-3xl">{mode === "up" ? "Create workspace" : "Sign in"}</h1>
-        <p className="text-sm text-muted-foreground">
-          Email on this app. Hiring tools on Connections next. Search is not unlocked here.
-        </p>
-        <form className="space-y-3" onSubmit={(event) => void onSubmit(event)}>
+    <AppShell
+      folio
+      action={
+        <Link to="/" className="font-ui underline underline-offset-4">
+          Back
+        </Link>
+      }
+    >
+      <main className="mx-auto grid w-full max-w-5xl flex-1 gap-12 px-4 py-14 sm:grid-cols-[1fr_1fr] sm:px-6">
+        <div>
+          <h1 className="font-display text-4xl sm:text-5xl">
+            {mode === "up" ? "Open a workspace" : "Return to the desk"}
+          </h1>
+          <p className="mt-4 max-w-sm font-sans text-lg leading-snug">
+            Email lives here. Hiring tools come next, on Connections. Search is not unlocked on this page.
+          </p>
+        </div>
+        <form className="space-y-4 border border-border bg-card p-6" onSubmit={(event) => void onSubmit(event)}>
           {mode === "up" ? (
-            <Input placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="name" />
+            <label className="block font-ui text-sm">
+              Name
+              <Input
+                className="mt-1"
+                placeholder="Your name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
+              />
+            </label>
           ) : null}
-          <Input
-            type="email"
-            placeholder="Work email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            autoComplete="email"
-            required
-          />
-          <Input
-            type="password"
-            placeholder="Password (8+ characters)"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete={mode === "up" ? "new-password" : "current-password"}
-            minLength={8}
-            required
-          />
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <label className="block font-ui text-sm">
+            Work email
+            <Input
+              className="mt-1"
+              type="email"
+              placeholder="you@studio.in"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+              required
+            />
+          </label>
+          <label className="block font-ui text-sm">
+            Password
+            <Input
+              className="mt-1"
+              type="password"
+              placeholder="8+ characters"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete={mode === "up" ? "new-password" : "current-password"}
+              minLength={8}
+              required
+            />
+          </label>
+          {error ? <p className="font-ui text-sm text-destructive">{error}</p> : null}
           <Button type="submit" disabled={busy} className="w-full">
             {busy ? "Working…" : mode === "up" ? "Create account" : "Sign in"}
           </Button>
+          <button
+            type="button"
+            className="font-ui text-sm text-muted-foreground underline underline-offset-4"
+            onClick={() => setMode(mode === "up" ? "in" : "up")}
+          >
+            {mode === "up" ? "Already have an account? Sign in" : "New here? Open a workspace"}
+          </button>
         </form>
-        <button
-          type="button"
-          className="text-sm text-muted-foreground underline"
-          onClick={() => setMode(mode === "up" ? "in" : "up")}
-        >
-          {mode === "up" ? "Already have an account? Sign in" : "New here? Create an account"}
-        </button>
-        <p className="text-xs text-muted-foreground">
-          <Link to="/">Back</Link>
-        </p>
       </main>
+      <footer className="mt-auto bg-blotter">
+        <DeskStrip />
+      </footer>
     </AppShell>
   );
 }

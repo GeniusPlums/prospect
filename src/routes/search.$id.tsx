@@ -33,7 +33,7 @@ type ScoreRow = {
 function VerdictBar({ forW, againstW, unclearW }: { forW: number; againstW: number; unclearW: number }) {
   const s = Math.max(0.001, forW + againstW + unclearW);
   return (
-    <div className="flex h-2 overflow-hidden rounded-full bg-secondary" aria-label="Verdict for, against, unclear">
+    <div className="flex h-1.5 overflow-hidden bg-secondary" aria-label="Verdict for, against, unclear">
       <span className="bg-for" style={{ width: `${(forW / s) * 100}%` }} />
       <span className="bg-against" style={{ width: `${(againstW / s) * 100}%` }} />
       <span className="bg-unclear" style={{ width: `${(unclearW / s) * 100}%` }} />
@@ -307,7 +307,7 @@ function DossierPanel({
         ) : null}
       </div>
       {proposedId ? (
-        <div className="rounded-xl border border-border bg-card p-3 text-sm">
+        <div className="border border-border bg-card p-3 font-ui text-sm">
           <p>A new ICP version was proposed from your vote. Rules is org-wide musts, not this diff.</p>
           <Button className="mt-2" size="sm" onClick={() => void onAcceptProposed()}>
             Accept proposed ICP

@@ -1,39 +1,44 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
-  --font-display: "Archivo", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-sans: "Source Serif 4", "Source Serif Pro", "Georgia", ui-serif, serif;
+  --font-display: "Newsreader", "Iowan Old Style", "Palatino Linotype", ui-serif, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-ui: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
 
-  --color-background: #fbfaf7;
-  --color-foreground: #10192b;
-  --color-card: #ffffff;
-  --color-card-foreground: #10192b;
-  --color-popover: #ffffff;
-  --color-popover-foreground: #10192b;
-  --color-primary: #10192b;
-  --color-primary-foreground: #fbfaf7;
-  --color-secondary: #eef0f3;
-  --color-secondary-foreground: #10192b;
-  --color-muted: #eef0f3;
-  --color-muted-foreground: #5c6573;
-  --color-accent: #e8ece9;
-  --color-accent-foreground: #10192b;
-  --color-border: #d9ddd6;
-  --color-input: #d9ddd6;
-  --color-ring: #0f766e;
+  --color-background: #efe6d4;
+  --color-foreground: #152238;
+  --color-card: #f7f0e2;
+  --color-card-foreground: #152238;
+  --color-popover: #f7f0e2;
+  --color-popover-foreground: #152238;
+  --color-primary: #152238;
+  --color-primary-foreground: #efe6d4;
+  --color-secondary: #e4d7bf;
+  --color-secondary-foreground: #152238;
+  --color-muted: #e4d7bf;
+  --color-muted-foreground: #5a5348;
+  --color-accent: #e8d4c4;
+  --color-accent-foreground: #152238;
+  --color-border: #c9b89a;
+  --color-input: #c9b89a;
+  --color-ring: #c23b22;
   --color-destructive: #9f1239;
-  --color-destructive-foreground: #fbfaf7;
-  --color-for: #0f766e;
-  --color-against: #5c6573;
-  --color-unclear: #8a8476;
+  --color-destructive-foreground: #efe6d4;
+  --color-for: #1f5c4a;
+  --color-against: #5a5348;
+  --color-unclear: #8a7a5c;
   --color-objection: #b45309;
   --color-block: #9f1239;
-  --color-sidebar: #f4f2ec;
+  --color-sidebar: #e6d9c4;
+  --color-ink: #152238;
+  --color-stamp: #c23b22;
+  --color-blotter: #152238;
+  --color-paper: #efe6d4;
 
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 16px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
 }
 
 @layer base {
@@ -51,17 +56,44 @@
     color: var(--color-foreground);
   }
   body {
-    font-family: var(--font-sans);
-    line-height: 1.5;
+    font-family: var(--font-ui);
+    line-height: 1.55;
+    background-color: var(--color-background);
   }
   h1,
   h2,
   h3 {
     font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.02em;
     text-wrap: balance;
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .font-ui {
+    font-family: var(--font-ui);
+  }
+  .font-display {
+    font-family: var(--font-display);
+  }
+  .ledger {
+    border: 1px solid var(--color-border);
+    background: var(--color-card);
+  }
+  .rule-navy {
+    border-top: 3px solid var(--color-ink);
+  }
+  .folio-paper {
+    background-image: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 31px,
+      color-mix(in srgb, var(--color-border) 28%, transparent) 32px
+    );
   }
 }

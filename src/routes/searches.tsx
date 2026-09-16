@@ -13,8 +13,8 @@ function SearchesPage() {
   return (
     <AppShell>
       <main className="mx-auto max-w-3xl px-4 py-10">
-        <h1 className="font-display text-3xl">Searches</h1>
-        <ul className="mt-6 divide-y divide-border rounded-xl border border-border bg-card">
+        <h1 className="font-display text-4xl">Searches</h1>
+        <ul className="mt-6 divide-y divide-border border-y border-border">
           {rows.map((r) => (
             <li key={r.id}>
               <Link

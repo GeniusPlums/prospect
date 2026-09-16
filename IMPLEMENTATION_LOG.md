@@ -1,5 +1,13 @@
 # Implementation log
 
+## 2026-09-16 — Paper desk, not vibe-coded SaaS
+
+**What changed.** Restyled the live app against Yakko’s “vibe-coded website” process: a product metaphor (junior-recruiter desk / gazette) that the whole site shares, not a unique asset on a generic template. Paper cream, navy ink, vermillion stamp; Newsreader + Source Serif; sharp edges; slim Source/Searches/Connections nav with More. Landing is editorial (no feature-grid hero). Unsigned landing paints immediately. Connections is a ledger with dashed empty/error/sign-in states. Honest-ux-journey canvas screens match. No Composio in UI copy.
+
+**Why.** Founder called the current design slop. Typical LLM chrome (Inter, pills, 9-item nav, identical rounded cards) fights the original paper/navy India-first art direction.
+
+**Tested.** `npx tsc --noEmit`; `npm test` (38 pass, 1 skip). Local `/` and `/connections` return 200; landing copy is “Fewer people. A case for each.” Connections signed-out empty is a dashed sign-in panel. IDE browser MCP could not attach a tab; verified via HTTP + HTML. No Prospect Playwright suite in this repo (`pnpm e2e:full` is Astrazen-only).
+
 ## 2026-09-16 — Prove catalog, OAuth, and tool calls (or fail honestly)
 
 **What changed.** Catalog lists hiring-lane tools via `toolkits.get({category,limit,cursor})`. The SDK returns a bare array and drops `next_cursor`; we stopped paging with the last slug (that was `Failed to fetch toolkits`). Connect only offers hosted OAuth when the toolkit has managed auth; otherwise the row shows `No hosted OAuth for this tool`. After sign-in, lanes are runnable only if we can load the tool list, pick a matching tool, and bind required fields from the real JSON schema — no needle-guessed slug and no dumped argument bag. Source / reveal / send / ATS stay closed when that bind fails. Product copy does not say Composio.

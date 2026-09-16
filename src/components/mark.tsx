@@ -7,16 +7,10 @@ export function Mark({ className }: { className?: string }) {
       className={cn("text-foreground", className)}
       aria-hidden
     >
-      <rect x="5" y="8" width="5" height="12" rx="1" fill="currentColor" />
-      <rect
-        x="13"
-        y="3"
-        width="5"
-        height="17"
-        rx="1"
-        fill="currentColor"
-        opacity="0.5"
-      />
+      <rect x="2" y="3" width="16" height="18" fill="currentColor" opacity="0.12" />
+      <rect x="4" y="5" width="16" height="18" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M8 10h8M8 14h6" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="18" cy="7" r="4" fill="#c23b22" />
     </svg>
   );
 }
